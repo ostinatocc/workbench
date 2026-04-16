@@ -60,32 +60,32 @@ Contract docs:
 
 Workbench now uses a split control plane internally:
 
-- [runtime.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/runtime.py)
+- [runtime.py](src/aionis_workbench/runtime.py)
   - thin facade
   - config and dependency wiring
   - execution packet and instrumentation assembly that still belongs to the core runtime boundary
-- [ops_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/ops_service.py)
+- [ops_service.py](src/aionis_workbench/ops_service.py)
   - doctor/setup
   - host contract
   - dashboard/background/consolidation surfaces
-- [session_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/session_service.py)
+- [session_service.py](src/aionis_workbench/session_service.py)
   - session initialization
   - bootstrap seeding
   - path and validation normalization
-- [recovery_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/recovery_service.py)
+- [recovery_service.py](src/aionis_workbench/recovery_service.py)
   - validation failure handling
   - correction packets
   - rollback and timeout recovery decisions
-- [orchestrator.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/orchestrator.py)
+- [orchestrator.py](src/aionis_workbench/orchestrator.py)
   - `run`
   - `resume`
   - `ingest`
   - live execution flow and runtime host coordination
-- [surface_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/surface_service.py)
+- [surface_service.py](src/aionis_workbench/surface_service.py)
   - canonical surface/views
   - bootstrap/status/evaluation shell flows
   - session persistence and auto-learning writeback
-- [runtime_contracts.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/runtime_contracts.py)
+- [runtime_contracts.py](src/aionis_workbench/runtime_contracts.py)
   - local validation/parsing for Workbench-to-Runtime responses
 
 This keeps the external `aionis` product contract stable while letting ops, orchestration, recovery, shell surfaces, and runtime bridge behavior evolve independently.
@@ -95,14 +95,22 @@ This keeps the external `aionis` product contract stable while letting ops, orch
 Shortest local developer install from the workspace root:
 
 ```bash
-bash /Volumes/ziel/Aioniscli/Aionis/scripts/install-local-aionis.sh
+bash ./scripts/install-local-aionis.sh
 ```
+
+The local install script now treats this repository as the root. It always installs the Workbench CLI into `.venv`, and will also install runtime dependencies if it can find a local Aionis Core checkout through one of:
+
+- `AIONIS_RUNTIME_ROOT`
+- `AIONIS_CORE_DIR`
+- `../AionisCore`
+- `../AionisRuntime`
+- `../runtime-mainline`
 
 Launcher guide:
 
-- [2026-04-03-aionis-launcher-guide.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-03-aionis-launcher-guide.md)
-- [2026-04-03-aionis-provider-setup-guide.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-03-aionis-provider-setup-guide.md)
-- [2026-04-15-aionis-external-positioning.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-15-aionis-external-positioning.md)
+- [2026-04-03-aionis-launcher-guide.md](docs/product/2026-04-03-aionis-launcher-guide.md)
+- [2026-04-03-aionis-provider-setup-guide.md](docs/product/2026-04-03-aionis-provider-setup-guide.md)
+- [2026-04-15-aionis-external-positioning.md](docs/product/2026-04-15-aionis-external-positioning.md)
 
 ## Recommended External Beta Path
 
@@ -137,12 +145,12 @@ Advanced operator and research surfaces still exist, but should not define the d
 
 Current platform status:
 
-- [2026-04-03-aionis-workbench-platform-status.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-03-aionis-workbench-platform-status.md)
-- [2026-04-03-aionis-workbench-real-e2e-status.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-03-aionis-workbench-real-e2e-status.md)
-- [2026-04-03-aionis-workbench-live-reliability-status.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-03-aionis-workbench-live-reliability-status.md)
-- [2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md)
-- [2026-04-04-aionis-long-running-app-harness-status.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-04-aionis-long-running-app-harness-status.md)
-- [2026-04-15-aionis-external-release-productization-plan.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-15-aionis-external-release-productization-plan.md)
+- [2026-04-03-aionis-workbench-platform-status.md](docs/plans/2026-04-03-aionis-workbench-platform-status.md)
+- [2026-04-03-aionis-workbench-real-e2e-status.md](docs/plans/2026-04-03-aionis-workbench-real-e2e-status.md)
+- [2026-04-03-aionis-workbench-live-reliability-status.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-status.md)
+- [2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md)
+- [2026-04-04-aionis-long-running-app-harness-status.md](docs/plans/2026-04-04-aionis-long-running-app-harness-status.md)
+- [2026-04-15-aionis-external-release-productization-plan.md](docs/plans/2026-04-15-aionis-external-release-productization-plan.md)
 
 Current app harness operator surfaces:
 
@@ -204,7 +212,7 @@ pip install -e .
 
 For a safer live-provider setup path, use:
 
-- [2026-04-03-aionis-provider-setup-guide.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-03-aionis-provider-setup-guide.md)
+- [2026-04-03-aionis-provider-setup-guide.md](docs/product/2026-04-03-aionis-provider-setup-guide.md)
 
 The examples below are reference values. Prefer loading them from a local `.env`-style file instead of typing secrets directly into long-lived shell history.
 
@@ -403,7 +411,7 @@ aionis --repo-root /absolute/path/to/repo
 
 Shell workflow guide:
 
-- `docs/product/2026-04-01-aionis-shell-guide.md`
+- [docs/product/2026-04-01-aionis-shell-guide.md](docs/product/2026-04-01-aionis-shell-guide.md)
 
 Inside the shell, the first-pass commands are:
 
@@ -643,8 +651,8 @@ aionis init --repo-root /absolute/path/to/repo
 Recommended first-time path:
 
 ```bash
-/Volumes/ziel/Aioniscli/Aionis/workbench/.venv/bin/aionis status
-/Volumes/ziel/Aioniscli/Aionis/workbench/.venv/bin/aionis --repo-root /absolute/path/to/repo
+.venv/bin/aionis status
+.venv/bin/aionis --repo-root /absolute/path/to/repo
 ```
 
 If your `PATH` already includes `workbench/.venv/bin`, the same path is:
@@ -705,7 +713,9 @@ For `--check NAME`, the CLI now uses stable exit codes:
 
 Structured workflow guide:
 
-- [2026-04-03-aionisdoc-workbench-guide.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-03-aionisdoc-workbench-guide.md)
+- [2026-04-03-aionisdoc-workbench-guide.md](docs/product/2026-04-03-aionisdoc-workbench-guide.md)
+
+Historical plan and case documents under `docs/plans` and `docs/cases` still preserve some original workspace-local paths from the monorepo phase. They are archival references, not the default onboarding path for this standalone repository.
 
 Use `Aionisdoc` through Workbench when you want `.aionis.md` workflows to stay tied to the current task session:
 

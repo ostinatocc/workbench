@@ -18,23 +18,23 @@ It does not yet bundle Python or Node for you.
 
 ## Install
 
-From the workspace root:
+From the repository root:
 
 ```bash
-bash /Volumes/ziel/Aioniscli/Aionis/scripts/install-local-aionis.sh
+bash ./scripts/install-local-aionis.sh
 ```
 
 That script:
 
-- creates or reuses `/Volumes/ziel/Aioniscli/Aionis/workbench/.venv`
+- creates or reuses `.venv`
 - installs Workbench in editable mode
-- installs runtime dependencies in `/Volumes/ziel/Aioniscli/Aionis/runtime-mainline`
+- installs runtime dependencies when it can find a local Aionis Core checkout via `AIONIS_RUNTIME_ROOT`, `AIONIS_CORE_DIR`, `../AionisCore`, `../AionisRuntime`, or `../runtime-mainline`
 - prints the exact `PATH` hint if you want bare `aionis` in your current shell
 
 If you do not want to modify `PATH`, use the explicit binary:
 
 ```bash
-/Volumes/ziel/Aioniscli/Aionis/workbench/.venv/bin/aionis status
+.venv/bin/aionis status
 ```
 
 ## First Run
@@ -42,8 +42,8 @@ If you do not want to modify `PATH`, use the explicit binary:
 Shortest path:
 
 ```bash
-/Volumes/ziel/Aioniscli/Aionis/workbench/.venv/bin/aionis status
-/Volumes/ziel/Aioniscli/Aionis/workbench/.venv/bin/aionis --repo-root /absolute/path/to/repo
+.venv/bin/aionis status
+.venv/bin/aionis --repo-root /absolute/path/to/repo
 ```
 
 If `PATH` already includes `workbench/.venv/bin`, the same path is:
@@ -69,7 +69,7 @@ Behavior:
 - `aionis status`
   - prints the current launcher/runtime status
 - `aionis start`
-  - attempts to boot the local `runtime-mainline` process
+  - attempts to boot the local Aionis Core runtime process
 - `aionis stop`
   - stops the managed local runtime process if one exists
 - `aionis shell`

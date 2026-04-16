@@ -7,14 +7,14 @@ The shell is still intentionally small. It is a workflow surface over the existi
 ## Start
 
 ```bash
-cd /Volumes/ziel/Aioniscli/Aionis/workbench
+cd /path/to/workbench
 aionis --repo-root /absolute/path/to/repo
 ```
 
 Example:
 
 ```bash
-aionis --repo-root /Volumes/ziel/Aioniscli/Aionis/samples/click-project-scope-twentysecond
+aionis --repo-root /absolute/path/to/repo
 ```
 
 If you want to materialize bootstrap state explicitly for a new repo:

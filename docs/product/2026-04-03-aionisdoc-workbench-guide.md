@@ -150,7 +150,7 @@ It does not yet support:
 
 For the current file-based editor handoff flow, see:
 
-- [2026-04-03-aionisdoc-editor-continuity-guide.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/product/2026-04-03-aionisdoc-editor-continuity-guide.md)
+- [2026-04-03-aionisdoc-editor-continuity-guide.md](2026-04-03-aionisdoc-editor-continuity-guide.md)
 
 ## Verification State
 

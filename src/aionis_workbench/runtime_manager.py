@@ -19,7 +19,33 @@ RUNTIME_STARTUP_HEALTH_POLL_INTERVAL_SECONDS = 0.25
 
 
 def _default_workspace_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_runtime_root(workspace_root: Path) -> Path:
+    explicit_candidates: list[Path] = []
+    for env_name in ("AIONIS_RUNTIME_ROOT", "AIONIS_CORE_DIR"):
+        raw = os.environ.get(env_name)
+        if raw:
+            explicit_candidates.append(Path(raw).expanduser())
+
+    for candidate in explicit_candidates:
+        if (candidate / "package.json").exists():
+            return candidate
+    if explicit_candidates:
+        return explicit_candidates[0]
+
+    implicit_candidates = [
+        workspace_root / "runtime-mainline",
+        workspace_root.parent / "runtime-mainline",
+        workspace_root.parent / "AionisCore",
+        workspace_root.parent / "AionisRuntime",
+    ]
+    for candidate in implicit_candidates:
+        if (candidate / "package.json").exists():
+            return candidate
+
+    return workspace_root / "runtime-mainline"
 
 
 def _candidate_runtime_base_urls() -> list[str]:
@@ -56,7 +82,7 @@ class RuntimeManager:
         npm_executable: str = "npm",
     ) -> None:
         self._workspace_root = Path(workspace_root) if workspace_root is not None else _default_workspace_root()
-        self._runtime_root = self._workspace_root / "runtime-mainline"
+        self._runtime_root = _resolve_runtime_root(self._workspace_root)
         self._paths = launcher_paths(Path(home) if home is not None else None)
         self._npm_executable = npm_executable
 

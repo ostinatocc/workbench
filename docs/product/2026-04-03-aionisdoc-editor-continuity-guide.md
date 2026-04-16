@@ -8,7 +8,7 @@ They should emit a stable event envelope and let Workbench record the result int
 
 Use the event contract here:
 
-- [aionisdoc-workbench-event-v1.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/contracts/aionisdoc-workbench-event-v1.md)
+- [aionisdoc-workbench-event-v1.md](../contracts/aionisdoc-workbench-event-v1.md)
 
 ## Current Ingest Command
 

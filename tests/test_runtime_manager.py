@@ -94,3 +94,15 @@ def test_runtime_manager_start_waits_for_delayed_runtime_health(tmp_path, monkey
     assert status["action"] == "started_runtime"
     assert health_calls[0] == 2.0
     assert health_calls[1:] == [5.0, 5.0]
+
+
+def test_runtime_manager_resolves_sibling_aionis_core_checkout(tmp_path) -> None:
+    workbench_root = tmp_path / "workbench"
+    workbench_root.mkdir()
+    runtime_root = tmp_path / "AionisCore"
+    runtime_root.mkdir()
+    (runtime_root / "package.json").write_text("{}")
+
+    manager = RuntimeManager(workspace_root=workbench_root, home=tmp_path)
+
+    assert manager._runtime_root == runtime_root

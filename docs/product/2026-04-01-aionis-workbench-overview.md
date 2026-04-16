@@ -37,7 +37,9 @@ This is already validated on a growing real-task corpus using `pallets/click`.
 
 For the latest implemented platform state, see:
 
-- [2026-04-03-aionis-workbench-platform-status.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/plans/2026-04-03-aionis-workbench-platform-status.md)
+- [2026-04-03-aionis-workbench-platform-status.md](../plans/2026-04-03-aionis-workbench-platform-status.md)
+
+Historical validation examples later in this document still reference original internal sample workspaces from the monorepo phase. Treat those as archival evidence, not as the default path for this standalone repository.
 
 ## Product Definition
 
@@ -135,28 +137,28 @@ Responsibility:
 
 Current engine repo:
 
-- `/Volumes/ziel/Aioniscli/Aionis/workbench`
+- `Aionis Workbench`
 
 Core engine modules:
 
-- [runtime.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/runtime.py)
+- [runtime.py](../../src/aionis_workbench/runtime.py)
   - thin facade and runtime-bound packet/instrumentation assembly
-- [ops_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/ops_service.py)
-- [session_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/session_service.py)
-- [recovery_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/recovery_service.py)
-- [orchestrator.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/orchestrator.py)
-- [surface_service.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/surface_service.py)
-- [runtime_contracts.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/runtime_contracts.py)
-- [policies.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/policies.py)
-- [session.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/session.py)
-- [context_layers.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/context_layers.py)
-- [execution_packet.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/execution_packet.py)
-- [provenance.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/provenance.py)
-- [aionis_bridge.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/aionis_bridge.py)
-- [cli.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/cli.py)
-- [config.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/config.py)
-- [roles.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/roles.py)
-- [tracing.py](/Volumes/ziel/Aioniscli/Aionis/workbench/src/aionis_workbench/tracing.py)
+- [ops_service.py](../../src/aionis_workbench/ops_service.py)
+- [session_service.py](../../src/aionis_workbench/session_service.py)
+- [recovery_service.py](../../src/aionis_workbench/recovery_service.py)
+- [orchestrator.py](../../src/aionis_workbench/orchestrator.py)
+- [surface_service.py](../../src/aionis_workbench/surface_service.py)
+- [runtime_contracts.py](../../src/aionis_workbench/runtime_contracts.py)
+- [policies.py](../../src/aionis_workbench/policies.py)
+- [session.py](../../src/aionis_workbench/session.py)
+- [context_layers.py](../../src/aionis_workbench/context_layers.py)
+- [execution_packet.py](../../src/aionis_workbench/execution_packet.py)
+- [provenance.py](../../src/aionis_workbench/provenance.py)
+- [aionis_bridge.py](../../src/aionis_workbench/aionis_bridge.py)
+- [cli.py](../../src/aionis_workbench/cli.py)
+- [config.py](../../src/aionis_workbench/config.py)
+- [roles.py](../../src/aionis_workbench/roles.py)
+- [tracing.py](../../src/aionis_workbench/tracing.py)
 
 Responsibility:
 
@@ -213,7 +215,7 @@ The execution packet is the primary task-state object and carries stable executi
 
 Reference:
 
-- [workbench-execution-packet-v1.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/contracts/workbench-execution-packet-v1.md)
+- [workbench-execution-packet-v1.md](../contracts/workbench-execution-packet-v1.md)
 
 ### Planner and provenance
 
@@ -230,7 +232,7 @@ They include:
 
 Reference:
 
-- [workbench-planner-provenance-v1.md](/Volumes/ziel/Aioniscli/Aionis/workbench/docs/contracts/workbench-planner-provenance-v1.md)
+- [workbench-planner-provenance-v1.md](../contracts/workbench-planner-provenance-v1.md)
 
 ### Context layering
 
