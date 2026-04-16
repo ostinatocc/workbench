@@ -10,6 +10,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Iterator
 
+from aionis_workbench.aionisdoc_bridge import (
+    resolve_aionisdoc_fixture_source,
+    resolve_aionisdoc_package_root,
+)
 from aionis_workbench.e2e.real_e2e.cli_driver import AionisCliRunResult, run_aionis
 from aionis_workbench.e2e.real_e2e.manifest import RealRepoSpec
 from aionis_workbench.e2e.real_e2e.repo_cache import ensure_repo_cached
@@ -25,19 +29,11 @@ from aionis_workbench.provider_profiles import (
     provider_profile_has_required_credentials,
     resolve_provider_profile,
 )
-from aionis_workbench.runtime_manager import RuntimeManager
+from aionis_workbench.runtime_manager import RuntimeManager, _resolve_runtime_root
 from aionis_workbench.runtime import AionisWorkbench
 
-
-def _default_aionisdoc_workspace_root() -> Path:
-    explicit = os.environ.get("AIONISDOC_WORKSPACE_ROOT")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    return (Path.home() / "Desktop" / "Aionis").resolve()
-
-
 def _fixture_workflow_source() -> Path:
-    return _default_aionisdoc_workspace_root() / "packages" / "aionis-doc" / "fixtures" / "valid-workflow.aionis.md"
+    return resolve_aionisdoc_fixture_source()
 
 
 def _extract_payload(stdout: str) -> dict[str, Any]:
@@ -106,9 +102,14 @@ def _parse_launcher_summary(text: str) -> dict[str, str]:
 
 
 def _scenario_env(*, project_identity: str, base_url: str) -> dict[str, str]:
+    workbench_root = Path(__file__).resolve().parents[3]
+    runtime_root = _resolve_runtime_root(workbench_root)
+    package_root = resolve_aionisdoc_package_root()
     return {
         "AIONIS_BASE_URL": base_url,
-        "AIONISDOC_WORKSPACE_ROOT": str(_default_aionisdoc_workspace_root()),
+        "AIONIS_RUNTIME_ROOT": str(runtime_root),
+        "AIONISDOC_PACKAGE_ROOT": str(package_root),
+        "AIONISDOC_WORKSPACE_ROOT": str(package_root.parents[1]),
         "WORKBENCH_PROJECT_IDENTITY": project_identity,
     }
 

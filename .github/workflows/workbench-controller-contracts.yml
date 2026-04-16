@@ -53,13 +53,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout AionisCore
+        uses: actions/checkout@v4
+        with:
+          repository: ostinatocc/AionisCore
+          path: AionisCore
+
       - name: Set up workbench
         uses: ./.github/actions/setup-workbench
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            AionisCore/package-lock.json
+
+      - name: Install AionisCore dependencies
+        shell: bash
+        working-directory: AionisCore
+        run: npm install
+
+      - name: Build aionis-doc package
+        shell: bash
+        working-directory: AionisCore
+        run: npm run -s aionis-doc:build
+
       - name: Run deterministic real e2e suite
         shell: bash
+        env:
+          AIONIS_RUNTIME_ROOT: ${{ github.workspace }}/AionisCore
+          AIONISDOC_PACKAGE_ROOT: ${{ github.workspace }}/AionisCore/packages/aionis-doc
         run: |
           set -o pipefail
           mkdir -p tmp/ci

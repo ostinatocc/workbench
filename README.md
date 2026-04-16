@@ -727,13 +727,23 @@ aionis doc --repo-root /absolute/path/to/repo recover --input ./publish-result.j
 aionis doc --repo-root /absolute/path/to/repo resume --input ./recover-result.json --task-id task-123 --input-kind recover-result --candidate read
 ```
 
-By default, the bridge resolves the external `Aionisdoc` toolchain from:
+By default, the bridge now prefers the official package roots in this order:
 
 ```text
+$AIONISDOC_PACKAGE_ROOT
+$AIONISDOC_WORKSPACE_ROOT/packages/aionis-doc
+../AionisCore/packages/aionis-doc
+../AionisRuntime/packages/aionis-doc
 ~/Desktop/Aionis/packages/aionis-doc
 ```
 
-Override it when needed:
+Override it explicitly when needed:
+
+```bash
+export AIONISDOC_PACKAGE_ROOT="/absolute/path/to/AionisCore/packages/aionis-doc"
+```
+
+Legacy workspace-root override still works:
 
 ```bash
 export AIONISDOC_WORKSPACE_ROOT="/absolute/path/to/Aionis"

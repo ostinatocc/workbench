@@ -25,6 +25,10 @@ def _isolate_provider_environment(monkeypatch):
         "OPENROUTER_MODEL",
         "WORKBENCH_MODEL",
         "AIONIS_PROVIDER_PROFILE",
+        "AIONIS_RUNTIME_ROOT",
+        "AIONIS_CORE_DIR",
+        "AIONISDOC_PACKAGE_ROOT",
+        "AIONISDOC_WORKSPACE_ROOT",
     ):
         monkeypatch.delenv(name, raising=False)
 

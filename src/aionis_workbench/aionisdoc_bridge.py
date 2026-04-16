@@ -7,11 +7,87 @@ from pathlib import Path
 from typing import Any
 
 
-def _default_aionis_workspace_root() -> Path:
-    explicit = os.environ.get("AIONISDOC_WORKSPACE_ROOT")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
+def _legacy_aionis_workspace_root() -> Path:
     return (Path.home() / "Desktop" / "Aionis").resolve()
+
+
+def _workbench_repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_optional_path(value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    return Path(value).expanduser().resolve()
+
+
+def _package_root_from_workspace_root(workspace_root: str | Path) -> Path:
+    return Path(workspace_root).expanduser().resolve() / "packages" / "aionis-doc"
+
+
+def _looks_like_aionisdoc_package_root(path: Path) -> bool:
+    return (path / "package.json").exists()
+
+
+def _iter_repo_search_anchors(workspace_root: Path | None) -> list[Path]:
+    anchors: list[Path] = []
+    seen: set[Path] = set()
+    for base in (workspace_root, _workbench_repo_root()):
+        if base is None:
+            continue
+        resolved = base.expanduser().resolve()
+        for candidate in [resolved, *list(resolved.parents)[:4]]:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            anchors.append(candidate)
+    return anchors
+
+
+def resolve_aionisdoc_package_root(
+    *,
+    workspace_root: str | Path | None = None,
+    aionis_workspace_root: str | Path | None = None,
+    aionis_package_root: str | Path | None = None,
+) -> Path:
+    explicit_package_root = _resolve_optional_path(aionis_package_root) or _resolve_optional_path(
+        os.environ.get("AIONISDOC_PACKAGE_ROOT")
+    )
+    if explicit_package_root is not None:
+        return explicit_package_root
+
+    explicit_workspace_root = _resolve_optional_path(aionis_workspace_root) or _resolve_optional_path(
+        os.environ.get("AIONISDOC_WORKSPACE_ROOT")
+    )
+    if explicit_workspace_root is not None:
+        return _package_root_from_workspace_root(explicit_workspace_root)
+
+    resolved_workspace_root = _resolve_optional_path(workspace_root)
+    for anchor in _iter_repo_search_anchors(resolved_workspace_root):
+        for repo_name in ("AionisCore", "AionisRuntime", "runtime-mainline"):
+            candidate = anchor / repo_name / "packages" / "aionis-doc"
+            if _looks_like_aionisdoc_package_root(candidate):
+                return candidate
+
+    return _package_root_from_workspace_root(_legacy_aionis_workspace_root())
+
+
+def resolve_aionisdoc_fixture_source(
+    fixture_name: str = "valid-workflow.aionis.md",
+    *,
+    workspace_root: str | Path | None = None,
+    aionis_workspace_root: str | Path | None = None,
+    aionis_package_root: str | Path | None = None,
+) -> Path:
+    return (
+        resolve_aionisdoc_package_root(
+            workspace_root=workspace_root,
+            aionis_workspace_root=aionis_workspace_root,
+            aionis_package_root=aionis_package_root,
+        )
+        / "fixtures"
+        / fixture_name
+    )
 
 
 class AionisdocBridgeError(RuntimeError):
@@ -43,15 +119,17 @@ class AionisdocBridge:
         *,
         workspace_root: str | Path | None = None,
         aionis_workspace_root: str | Path | None = None,
+        aionis_package_root: str | Path | None = None,
         node_executable: str = "node",
         timeout_seconds: float = 60.0,
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve() if workspace_root is not None else Path.cwd().resolve()
-        self._aionis_workspace_root = (
-            Path(aionis_workspace_root).expanduser().resolve()
-            if aionis_workspace_root is not None
-            else _default_aionis_workspace_root()
+        self._package_root = resolve_aionisdoc_package_root(
+            workspace_root=self._workspace_root,
+            aionis_workspace_root=aionis_workspace_root,
+            aionis_package_root=aionis_package_root,
         )
+        self._aionis_workspace_root = self._package_root.parents[1]
         self._node_executable = node_executable
         self._timeout_seconds = timeout_seconds
 
@@ -65,7 +143,7 @@ class AionisdocBridge:
 
     @property
     def package_root(self) -> Path:
-        return self._aionis_workspace_root / "packages" / "aionis-doc"
+        return self._package_root
 
     @property
     def dist_root(self) -> Path:

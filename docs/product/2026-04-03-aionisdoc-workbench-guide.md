@@ -23,13 +23,23 @@ The current integration is now beyond pure Phase 1. Workbench also exposes repo 
 
 ## Prerequisites
 
-Workbench expects the external `Aionisdoc` package to be available under:
+Workbench now prefers the official `Aionisdoc` package roots in this order:
 
 ```text
+$AIONISDOC_PACKAGE_ROOT
+$AIONISDOC_WORKSPACE_ROOT/packages/aionis-doc
+../AionisCore/packages/aionis-doc
+../AionisRuntime/packages/aionis-doc
 ~/Desktop/Aionis/packages/aionis-doc
 ```
 
-Override that location with:
+The most direct override is:
+
+```bash
+export AIONISDOC_PACKAGE_ROOT="/absolute/path/to/AionisCore/packages/aionis-doc"
+```
+
+Legacy workspace-root override still works:
 
 ```bash
 export AIONISDOC_WORKSPACE_ROOT="/absolute/path/to/Aionis"

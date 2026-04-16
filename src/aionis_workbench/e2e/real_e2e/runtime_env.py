@@ -10,6 +10,11 @@ from typing import Iterator
 
 from aionis_workbench.runtime_manager import RuntimeManager
 
+REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS = float(
+    os.environ.get("AIONIS_REAL_RUNTIME_POST_START_HEALTH_WAIT_SECONDS", "10.0")
+)
+REAL_RUNTIME_ENV_POST_START_HEALTH_POLL_INTERVAL_SECONDS = 0.25
+
 
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -47,7 +52,17 @@ class RealRuntimeEnv:
 
     def start(self) -> dict[str, object]:
         with _runtime_base_url(self.base_url):
-            return self._manager.start()
+            payload = self._manager.start()
+            if payload.get("mode") != "running" or payload.get("health_status") == "available":
+                return payload
+
+            deadline = time.monotonic() + REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                status = self._manager.status()
+                if status.get("health_status") == "available":
+                    return status
+                time.sleep(REAL_RUNTIME_ENV_POST_START_HEALTH_POLL_INTERVAL_SECONDS)
+            return payload
 
     def stop(self) -> dict[str, object]:
         with _runtime_base_url(self.base_url):

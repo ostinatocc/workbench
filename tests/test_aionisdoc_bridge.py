@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,8 @@ from aionis_workbench.aionisdoc_bridge import (
     AionisdocBridge,
     AionisdocBridgeError,
     AionisdocInvocationError,
+    resolve_aionisdoc_fixture_source,
+    resolve_aionisdoc_package_root,
 )
 
 
@@ -25,7 +28,29 @@ def _make_fake_aionisdoc_workspace(tmp_path):
         "resume-cli.js",
     ):
         (dist / filename).write_text("// stub\n")
+    (dist.parent / "package.json").write_text('{"name":"@aionis/doc"}\n')
     return tmp_path / "DesktopAionis"
+
+
+def _make_fake_aionisdoc_package_root(root: Path) -> Path:
+    dist = root / "dist"
+    fixtures = root / "fixtures"
+    dist.mkdir(parents=True)
+    fixtures.mkdir(parents=True)
+    for filename in (
+        "cli.js",
+        "run-cli.js",
+        "execute-cli.js",
+        "runtime-handoff-cli.js",
+        "handoff-store-cli.js",
+        "publish-cli.js",
+        "recover-cli.js",
+        "resume-cli.js",
+    ):
+        (dist / filename).write_text("// stub\n")
+    (root / "package.json").write_text('{"name":"@aionis/doc"}\n')
+    (fixtures / "valid-workflow.aionis.md").write_text("@doc { id: \"fixture\" version: \"1.0\" kind: \"task\" }\n")
+    return root
 
 
 def test_bridge_builds_compile_command(tmp_path) -> None:
@@ -121,3 +146,46 @@ def test_bridge_raises_when_command_produces_no_json(tmp_path, monkeypatch) -> N
 
     with pytest.raises(AionisdocInvocationError, match="produced no JSON output"):
         bridge.compile(input_path="workflow.aionis.md")
+
+
+def test_bridge_prefers_explicit_package_root_over_workspace_root(tmp_path) -> None:
+    workspace_root = _make_fake_aionisdoc_workspace(tmp_path)
+    package_root = _make_fake_aionisdoc_package_root(tmp_path / "CustomPackageRoot")
+
+    bridge = AionisdocBridge(
+        workspace_root=tmp_path,
+        aionis_workspace_root=workspace_root,
+        aionis_package_root=package_root,
+    )
+
+    assert bridge.package_root == package_root.resolve()
+    assert bridge.entrypoint_path("compile") == package_root.resolve() / "dist" / "cli.js"
+
+
+def test_resolve_package_root_prefers_sibling_official_repo_before_legacy_desktop(tmp_path, monkeypatch) -> None:
+    workbench_root = tmp_path / "sandbox" / "workbench"
+    workbench_root.mkdir(parents=True)
+    sibling_package_root = _make_fake_aionisdoc_package_root(tmp_path / "sandbox" / "AionisRuntime" / "packages" / "aionis-doc")
+    legacy_workspace_root = _make_fake_aionisdoc_workspace(tmp_path)
+
+    monkeypatch.setattr("aionis_workbench.aionisdoc_bridge._workbench_repo_root", lambda: workbench_root)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    resolved = resolve_aionisdoc_package_root()
+
+    assert resolved == sibling_package_root.resolve()
+    assert resolved != legacy_workspace_root / "packages" / "aionis-doc"
+
+
+def test_resolve_fixture_source_prefers_sibling_package_fixture(tmp_path, monkeypatch) -> None:
+    workbench_root = tmp_path / "sandbox" / "workbench"
+    workbench_root.mkdir(parents=True)
+    sibling_package_root = _make_fake_aionisdoc_package_root(tmp_path / "sandbox" / "AionisCore" / "packages" / "aionis-doc")
+    _make_fake_aionisdoc_workspace(tmp_path)
+
+    monkeypatch.setattr("aionis_workbench.aionisdoc_bridge._workbench_repo_root", lambda: workbench_root)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    resolved = resolve_aionisdoc_fixture_source()
+
+    assert resolved == sibling_package_root / "fixtures" / "valid-workflow.aionis.md"
