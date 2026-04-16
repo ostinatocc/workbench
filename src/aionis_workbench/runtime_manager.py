@@ -73,6 +73,15 @@ def _pid_is_alive(pid: int) -> bool:
     return True
 
 
+def _signal_runtime_process_group(pid: int, sig: int) -> None:
+    try:
+        os.killpg(pid, sig)
+        return
+    except (AttributeError, ProcessLookupError, OSError):
+        pass
+    os.kill(pid, sig)
+
+
 class RuntimeManager:
     def __init__(
         self,
@@ -260,7 +269,7 @@ class RuntimeManager:
             current["pid"] = None
             return current
 
-        os.kill(pid, signal.SIGTERM)
+        _signal_runtime_process_group(pid, signal.SIGTERM)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             if not _pid_is_alive(pid):

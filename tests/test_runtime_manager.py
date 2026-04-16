@@ -106,3 +106,38 @@ def test_runtime_manager_resolves_sibling_aionis_core_checkout(tmp_path) -> None
     manager = RuntimeManager(workspace_root=workbench_root, home=tmp_path)
 
     assert manager._runtime_root == runtime_root
+
+
+def test_runtime_manager_stop_signals_process_group(tmp_path, monkeypatch) -> None:
+    runtime_root = tmp_path / "runtime-mainline"
+    runtime_root.mkdir()
+    (runtime_root / "package.json").write_text("{}")
+
+    state = {"alive": True}
+    observed: dict[str, object] = {}
+
+    def fake_pid_is_alive(pid: int) -> bool:
+        return state["alive"]
+
+    def fake_signal_runtime_process_group(pid: int, sig: int) -> None:
+        observed["pid"] = pid
+        observed["sig"] = sig
+        state["alive"] = False
+
+    monkeypatch.setattr("aionis_workbench.runtime_manager._runtime_health_status", lambda base_url: ("offline", None))
+    monkeypatch.setattr("aionis_workbench.runtime_manager._pid_is_alive", fake_pid_is_alive)
+    monkeypatch.setattr(
+        "aionis_workbench.runtime_manager._signal_runtime_process_group",
+        fake_signal_runtime_process_group,
+    )
+    monkeypatch.setattr("aionis_workbench.runtime_manager.time.sleep", lambda seconds: None)
+
+    manager = RuntimeManager(workspace_root=tmp_path, home=tmp_path)
+    manager._paths.runtime_pid.parent.mkdir(parents=True, exist_ok=True)
+    manager._paths.runtime_pid.write_text("4321")
+
+    status = manager.stop()
+
+    assert observed["pid"] == 4321
+    assert status["action"] == "stopped_runtime"
+    assert status["pid"] is None

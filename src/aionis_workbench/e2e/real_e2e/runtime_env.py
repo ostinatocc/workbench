@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from aionis_workbench.runtime_manager import RuntimeManager
+from aionis_workbench.runtime_manager import RuntimeManager, _signal_runtime_process_group
 
 REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS = float(
     os.environ.get("AIONIS_REAL_RUNTIME_POST_START_HEALTH_WAIT_SECONDS", "20.0")
@@ -87,7 +87,7 @@ class RealRuntimeEnv:
             pid = payload.get("pid")
             if isinstance(pid, int):
                 try:
-                    os.kill(pid, signal.SIGKILL)
+                    _signal_runtime_process_group(pid, signal.SIGKILL)
                 except OSError:
                     pass
                 deadline = time.monotonic() + 2.0
