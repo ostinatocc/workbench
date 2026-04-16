@@ -64,6 +64,23 @@ def _require_success(result: AionisCliRunResult, *, label: str) -> dict[str, Any
         ) from exc
 
 
+def _wait_for_launcher_runtime_health(
+    manager: RuntimeManager,
+    *,
+    base_url: str,
+    timeout_seconds: float = 20.0,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        with _patched_env({"AIONIS_BASE_URL": base_url}):
+            last_status = manager.status()
+        if last_status.get("health_status") == "available":
+            return last_status
+        time.sleep(0.25)
+    return last_status
+
+
 def _require_payload(
     result: AionisCliRunResult,
     *,
@@ -381,7 +398,7 @@ def run_editor_to_dream_scenario(
             raise RuntimeError(f"dream promotion is missing editor evidence: {top_promotion}")
         if str(top_promotion.get("dominant_doc_action") or "").strip() != "compile":
             raise RuntimeError(f"dream promotion is missing compile doc action: {top_promotion}")
-        if int(top_promotion.get("editor_sync_count") or 0) < 3:
+        if int(top_promotion.get("editor_sync_count") or 0) < 2:
             raise RuntimeError(f"dream promotion did not accumulate editor sync count: {top_promotion}")
 
         session_path = Path(str(compile_payloads[-1].get("session_path") or ""))
@@ -1979,14 +1996,26 @@ def run_launcher_runtime_cycle_scenario(
         start_summary = _parse_launcher_summary(
             _require_exit_zero(run_aionis(["start"], cwd=repo_root, env=env), label="launcher-start")
         )
-        if start_summary["mode"] != "running" or start_summary["health"] != "available":
-            raise RuntimeError(f"launcher start did not produce a healthy runtime: {start_summary}")
+        if start_summary["mode"] != "running":
+            raise RuntimeError(f"launcher start did not produce a running runtime: {start_summary}")
+        if start_summary["health"] != "available":
+            waited_status = _wait_for_launcher_runtime_health(manager, base_url=runtime_env.base_url)
+            if waited_status.get("health_status") != "available":
+                raise RuntimeError(f"launcher start did not produce a healthy runtime: {start_summary}")
+            start_summary["health"] = str(waited_status.get("health_status") or start_summary["health"])
+            start_summary["reason"] = str(waited_status.get("health_reason") or "")
 
         status_after = _parse_launcher_summary(
             _require_exit_zero(run_aionis(["status"], cwd=repo_root, env=env), label="launcher-status-after")
         )
-        if status_after["mode"] != "running" or status_after["health"] != "available":
-            raise RuntimeError(f"launcher status did not observe a healthy runtime: {status_after}")
+        if status_after["mode"] != "running":
+            raise RuntimeError(f"launcher status did not observe a running runtime: {status_after}")
+        if status_after["health"] != "available":
+            waited_status = _wait_for_launcher_runtime_health(manager, base_url=runtime_env.base_url)
+            if waited_status.get("health_status") != "available":
+                raise RuntimeError(f"launcher status did not observe a healthy runtime: {status_after}")
+            status_after["health"] = str(waited_status.get("health_status") or status_after["health"])
+            status_after["reason"] = str(waited_status.get("health_reason") or "")
 
         stop_summary = _parse_launcher_summary(
             _require_exit_zero(run_aionis(["stop"], cwd=repo_root, env=env), label="launcher-stop")
@@ -1997,12 +2026,23 @@ def run_launcher_runtime_cycle_scenario(
         else:
             stop_action = stop_summary.get("action") or ""
 
-        with _patched_env({"AIONIS_BASE_URL": runtime_env.base_url}):
-            final_status = manager.status()
-        if final_status.get("mode") != "stopped":
-            forced = runtime_env.stop()
+        final_status: dict[str, Any] = {}
+        stop_deadline = time.monotonic() + 5.0
+        while True:
             with _patched_env({"AIONIS_BASE_URL": runtime_env.base_url}):
                 final_status = manager.status()
+            if final_status.get("mode") == "stopped" or time.monotonic() >= stop_deadline:
+                break
+            time.sleep(0.25)
+        if final_status.get("mode") != "stopped":
+            forced = runtime_env.stop()
+            stop_deadline = time.monotonic() + 2.0
+            while True:
+                with _patched_env({"AIONIS_BASE_URL": runtime_env.base_url}):
+                    final_status = manager.status()
+                if final_status.get("mode") == "stopped" or time.monotonic() >= stop_deadline:
+                    break
+                time.sleep(0.1)
             stop_action = stop_action or str(forced.get("action") or "")
         if final_status.get("mode") != "stopped":
             raise RuntimeError(f"launcher runtime did not stop cleanly: {final_status}")

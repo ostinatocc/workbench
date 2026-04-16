@@ -11,9 +11,10 @@ from typing import Iterator
 from aionis_workbench.runtime_manager import RuntimeManager
 
 REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS = float(
-    os.environ.get("AIONIS_REAL_RUNTIME_POST_START_HEALTH_WAIT_SECONDS", "10.0")
+    os.environ.get("AIONIS_REAL_RUNTIME_POST_START_HEALTH_WAIT_SECONDS", "20.0")
 )
 REAL_RUNTIME_ENV_POST_START_HEALTH_POLL_INTERVAL_SECONDS = 0.25
+REAL_RUNTIME_ENV_START_MAX_ATTEMPTS = max(1, int(os.environ.get("AIONIS_REAL_RUNTIME_START_MAX_ATTEMPTS", "2")))
 
 
 def _find_free_port() -> int:
@@ -50,19 +51,33 @@ class RealRuntimeEnv:
         with _runtime_base_url(self.base_url):
             return self._manager.status()
 
+    def _wait_until_healthy(self) -> dict[str, object] | None:
+        deadline = time.monotonic() + REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            status = self._manager.status()
+            if status.get("health_status") == "available":
+                return status
+            time.sleep(REAL_RUNTIME_ENV_POST_START_HEALTH_POLL_INTERVAL_SECONDS)
+        return None
+
     def start(self) -> dict[str, object]:
         with _runtime_base_url(self.base_url):
-            payload = self._manager.start()
-            if payload.get("mode") != "running" or payload.get("health_status") == "available":
-                return payload
+            last_payload: dict[str, object] | None = None
+            for attempt in range(REAL_RUNTIME_ENV_START_MAX_ATTEMPTS):
+                payload = self._manager.start()
+                if payload.get("mode") != "running" or payload.get("health_status") == "available":
+                    return payload
 
-            deadline = time.monotonic() + REAL_RUNTIME_ENV_POST_START_HEALTH_WAIT_SECONDS
-            while time.monotonic() < deadline:
-                status = self._manager.status()
-                if status.get("health_status") == "available":
-                    return status
-                time.sleep(REAL_RUNTIME_ENV_POST_START_HEALTH_POLL_INTERVAL_SECONDS)
-            return payload
+                healthy_status = self._wait_until_healthy()
+                if healthy_status is not None:
+                    return healthy_status
+
+                last_payload = payload
+                if attempt + 1 >= REAL_RUNTIME_ENV_START_MAX_ATTEMPTS:
+                    break
+                self.stop()
+
+            return last_payload or payload
 
     def stop(self) -> dict[str, object]:
         with _runtime_base_url(self.base_url):

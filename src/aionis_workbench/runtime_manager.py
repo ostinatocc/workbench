@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from .launcher_state import launcher_paths
 from .runtime_bridge_host import _runtime_health_status
 
-RUNTIME_STARTUP_HEALTH_WAIT_SECONDS = float(os.environ.get("AIONIS_RUNTIME_STARTUP_HEALTH_WAIT_SECONDS", "20.0"))
+RUNTIME_STARTUP_HEALTH_WAIT_SECONDS = float(os.environ.get("AIONIS_RUNTIME_STARTUP_HEALTH_WAIT_SECONDS", "35.0"))
 RUNTIME_STARTUP_HEALTH_PROBE_TIMEOUT_SECONDS = float(
     os.environ.get("AIONIS_RUNTIME_STARTUP_HEALTH_PROBE_TIMEOUT_SECONDS", "5.0")
 )

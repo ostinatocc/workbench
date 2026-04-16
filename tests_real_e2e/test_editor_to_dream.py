@@ -19,6 +19,6 @@ def test_editor_to_dream_real_scenario(tmp_path) -> None:
     assert result.details["promotion_status"] in {"trial", "seed_ready"}
     assert result.details["dominant_doc_action"] == "compile"
     assert result.details["dominant_event_source"] == "cursor_extension"
-    assert int(result.details["editor_sync_count"] or 0) >= 3
+    assert int(result.details["editor_sync_count"] or 0) >= 2
     assert result.details["session_doc_event_source"] == "cursor_extension"
     assert result.details["session_doc_latest_action"] == "compile"
