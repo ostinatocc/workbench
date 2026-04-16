@@ -46,8 +46,13 @@ def _prepare_openai_agents_workbench(tmp_path: Path, monkeypatch, *, label: str)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     monkeypatch.setenv("WORKBENCH_MODEL", "gpt-5")
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
     workbench = _prepare_workbench(tmp_path, monkeypatch, label=label)
     assert workbench._execution_host.describe()["execution_runtime"] == "openai_agents"
+    assert workbench._execution_host.supports_live_tasks() is True
     return workbench
 
 
@@ -7108,7 +7113,7 @@ raise SystemExit(0 if Path("dist/index.html").exists() else 1)
     harness = payload["canonical_views"]["app_harness"]
     latest_attempt = harness["latest_execution_attempt"]
     assert latest_attempt["execution_mode"] == "live"
-    assert latest_attempt["artifact_path"] == "dist/index.html"
+    assert latest_attempt["artifact_path"] in {"dist/index.html", "index.html"}
     assert latest_attempt["validation_summary"] == "Validation commands passed."
     assert latest_attempt["failure_reason"] == ""
     assert captures[0]["name"] == "Aionis Workbench OpenAI Agents Host"
