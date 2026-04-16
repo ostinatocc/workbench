@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from .config import AionisConfig, WorkbenchConfig
+from .execution_host_contract import (
+    DEFAULT_EXECUTION_BACKEND,
+    DEFAULT_EXECUTION_HOST_NAME,
+    DEFAULT_EXECUTION_RUNTIME,
+)
 
 
 @dataclass(frozen=True)
@@ -108,9 +113,9 @@ def build_unified_host_contract(
             ],
         ),
         execution_host=ExecutionHost(
-            name=str(execution_host_description.get("name") or "deepagents_local_shell"),
-            execution_runtime=str(execution_host_description.get("execution_runtime") or "deepagents"),
-            backend=str(execution_host_description.get("backend") or "LocalShellBackend"),
+            name=str(execution_host_description.get("name") or DEFAULT_EXECUTION_HOST_NAME),
+            execution_runtime=str(execution_host_description.get("execution_runtime") or DEFAULT_EXECUTION_RUNTIME),
+            backend=str(execution_host_description.get("backend") or DEFAULT_EXECUTION_BACKEND),
             model_provider=str(execution_host_description.get("model_provider") or workbench_config.provider),
             model_available=bool(execution_host_description.get("model_available", bool(workbench_config.api_key))),
             supports_live_tasks=bool(

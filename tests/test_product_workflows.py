@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from test_bootstrap import _seed_python_repo
 
@@ -38,6 +39,49 @@ def _prepare_workbench(tmp_path: Path, monkeypatch, *, label: str) -> AionisWork
     monkeypatch.setenv("AIONIS_BASE_URL", "http://127.0.0.1:3101")
     monkeypatch.setenv("WORKBENCH_PROJECT_IDENTITY", f"tests/{label}-{str(tmp_path).replace('/', '_')}")
     return AionisWorkbench(repo_root=str(tmp_path))
+
+
+def _prepare_openai_agents_workbench(tmp_path: Path, monkeypatch, *, label: str) -> AionisWorkbench:
+    monkeypatch.setenv("WORKBENCH_EXECUTION_HOST", "openai_agents")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("WORKBENCH_MODEL", "gpt-5")
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label=label)
+    assert workbench._execution_host.describe()["execution_runtime"] == "openai_agents"
+    return workbench
+
+
+def _stub_openai_agents_json_runtime(monkeypatch, workbench: AionisWorkbench, *, responses, captures: list[dict[str, str]] | None = None) -> None:
+    host = workbench._execution_host
+
+    class _FakeAgent:
+        def __init__(self, *, name, instructions, model, tools=None) -> None:
+            self.name = name
+            self.instructions = instructions
+            self.model = model
+            self.tools = tools or []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(agent, user_input):
+            if captures is not None:
+                captures.append(
+                    {
+                        "name": str(agent.name),
+                        "instructions": str(agent.instructions),
+                        "user_input": str(user_input),
+                    }
+                )
+            payload_or_factory = responses[str(agent.name)]
+            payload = payload_or_factory(agent, user_input) if callable(payload_or_factory) else payload_or_factory
+            return SimpleNamespace(final_output=json.dumps(payload, ensure_ascii=False))
+
+    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (_FakeAgent, _FakeRunner, lambda fn: fn, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
 
 
 def test_product_runtime_does_not_load_repo_env_by_default(tmp_path, monkeypatch) -> None:
@@ -6565,6 +6609,510 @@ def test_product_runtime_app_retry_uses_live_planner_when_requested(tmp_path, mo
     ]
     assert harness["retry_count"] == 1
     assert harness["loop_status"] == "revision_recorded"
+
+
+def test_product_runtime_app_plan_uses_openai_agents_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-planner")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-planner-1",
+        task="Use the openai-agents execution host to produce the initial app plan.",
+        target_files=["src/demo.py"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    captures: list[dict[str, str]] = []
+    _stub_openai_agents_json_runtime(
+        monkeypatch,
+        workbench,
+        responses={
+            "Workbench live planner": {
+                "title": "Atlas Board",
+                "app_type": "desktop_like_web_app",
+                "stack": ["React", "Vite", "SQLite"],
+                "features": ["dependency board", "async lane", "project workspace"],
+                "design_direction": "dense operator board with clear lanes",
+                "planning_rationale": [
+                    "Lead with the dependency board so the product intent is legible immediately.",
+                    "Keep async lane work in the initial release path because it validates orchestration depth.",
+                ],
+                "sprint_1": {
+                    "goal": "Ship the first usable dependency board workflow.",
+                    "scope": ["dependency board", "async lane", "navigation shell"],
+                    "acceptance_checks": ["npm test"],
+                    "done_definition": [
+                        "dependency board is interactive",
+                        "async lane explains orchestration state",
+                    ],
+                },
+            }
+        },
+        captures=captures,
+    )
+
+    payload = workbench.app_plan(
+        task_id="product-openai-agents-live-planner-1",
+        prompt="Build a visual dependency explorer for async task orchestration.",
+        use_live_planner=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    assert payload["planner_mode"] == "live"
+    assert harness["planner_mode"] == "live"
+    assert harness["product_spec"]["title"] == "Atlas Board"
+    assert harness["active_sprint_contract"]["proposed_by"] == "live_planner"
+    assert captures[0]["name"] == "Workbench live planner"
+    assert "Project request: Build a visual dependency explorer for async task orchestration." in captures[0]["user_input"]
+
+
+def test_product_runtime_app_qa_uses_openai_agents_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-evaluator")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-evaluator-1",
+        task="Use the openai-agents execution host to score the active sprint.",
+        target_files=["src/demo.py"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    workbench.app_plan(
+        task_id="product-openai-agents-live-evaluator-1",
+        prompt="Build a visual pixel-art editor.",
+        title="Pixel Forge",
+        app_type="full_stack_app",
+        stack=["React", "FastAPI"],
+        features=["canvas", "palette"],
+        criteria=["functionality:0.8", "design_quality:0.7"],
+    )
+    workbench.app_sprint(
+        task_id="product-openai-agents-live-evaluator-1",
+        sprint_id="sprint-1",
+        goal="Ship the editor shell.",
+        scope=["shell", "canvas"],
+        acceptance_checks=["pytest tests/test_editor.py -q"],
+        done_definition=["editor loads"],
+        proposed_by="planner",
+        approved=True,
+    )
+    captures: list[dict[str, str]] = []
+
+    def _fake_evaluator(_agent, user_input):
+        payload = json.loads(user_input)
+        assert payload["requested_status"] == "auto"
+        assert payload["sprint_contract"]["sprint_id"] == "sprint-1"
+        return {
+            "status": "failed",
+            "summary": "The shell is usable, but palette persistence still fails the evaluator bar.",
+            "passing_criteria": ["design_quality"],
+            "failing_criteria": ["functionality"],
+            "blocker_notes": ["palette resets on refresh"],
+            "criteria_scores": {"functionality": 0.61, "design_quality": 0.79},
+        }
+
+    _stub_openai_agents_json_runtime(
+        monkeypatch,
+        workbench,
+        responses={"Workbench live evaluator": _fake_evaluator},
+        captures=captures,
+    )
+
+    payload = workbench.app_qa(
+        task_id="product-openai-agents-live-evaluator-1",
+        sprint_id="sprint-1",
+        use_live_evaluator=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    assert harness["latest_sprint_evaluation"]["evaluator_mode"] == "live"
+    assert harness["latest_sprint_evaluation"]["status"] == "failed"
+    assert harness["latest_sprint_evaluation"]["failing_criteria"] == ["functionality"]
+    assert captures[0]["name"] == "Workbench live evaluator"
+
+
+def test_product_runtime_app_negotiate_uses_openai_agents_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-negotiate")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-negotiate-1",
+        task="Use the openai-agents execution host to negotiate the current sprint.",
+        target_files=["src/demo.py"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    workbench.app_plan(
+        task_id="product-openai-agents-live-negotiate-1",
+        prompt="Build a visual pixel-art editor.",
+        title="Pixel Forge",
+        app_type="full_stack_app",
+        stack=["React", "FastAPI"],
+        features=["canvas", "palette"],
+        criteria=["functionality:0.8", "design_quality:0.7"],
+    )
+    workbench.app_sprint(
+        task_id="product-openai-agents-live-negotiate-1",
+        sprint_id="sprint-1",
+        goal="Ship the editor shell.",
+        scope=["shell", "canvas"],
+        acceptance_checks=["pytest tests/test_editor.py -q"],
+        done_definition=["editor loads"],
+        proposed_by="planner",
+        approved=True,
+    )
+    workbench.app_qa(
+        task_id="product-openai-agents-live-negotiate-1",
+        sprint_id="sprint-1",
+        status="failed",
+        blocker_notes=["palette resets on refresh"],
+    )
+
+    def _fake_negotiator(_agent, user_input):
+        payload = json.loads(user_input)
+        assert payload["sprint_contract"]["sprint_id"] == "sprint-1"
+        assert payload["objections"] == ["timeline entries reset on refresh"]
+        return {
+            "recommended_action": "revise_current_sprint",
+            "planner_response": [
+                "Revise sprint-1 around palette persistence before expanding the surface area.",
+                "Keep sprint-1 tied to the existing acceptance check until refresh behavior is stable.",
+            ],
+            "sprint_negotiation_notes": [
+                "Evaluator should re-check palette persistence before approving follow-up scope.",
+                "Do not approve sprint-2 until the editor shell survives refresh.",
+            ],
+        }
+
+    _stub_openai_agents_json_runtime(
+        monkeypatch,
+        workbench,
+        responses={"Workbench live negotiator": _fake_negotiator},
+    )
+
+    payload = workbench.app_negotiate(
+        task_id="product-openai-agents-live-negotiate-1",
+        sprint_id="sprint-1",
+        objections=["timeline entries reset on refresh"],
+        use_live_planner=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    assert harness["latest_negotiation_round"]["planner_mode"] == "live"
+    assert harness["latest_negotiation_round"]["recommended_action"] == "revise_current_sprint"
+    assert harness["sprint_negotiation_notes"][0] == (
+        "Evaluator should re-check palette persistence before approving follow-up scope."
+    )
+
+
+def test_product_runtime_app_retry_uses_openai_agents_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-retry")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-retry-1",
+        task="Use the openai-agents execution host to derive one bounded sprint revision.",
+        target_files=["src/demo.py"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    workbench.app_plan(
+        task_id="product-openai-agents-live-retry-1",
+        prompt="Build a visual pixel-art editor.",
+        title="Pixel Forge",
+        app_type="full_stack_app",
+        stack=["React", "FastAPI"],
+        features=["canvas", "palette"],
+        criteria=["functionality:0.8", "design_quality:0.7"],
+    )
+    workbench.app_sprint(
+        task_id="product-openai-agents-live-retry-1",
+        sprint_id="sprint-1",
+        goal="Ship the editor shell.",
+        scope=["shell", "canvas"],
+        acceptance_checks=["pytest tests/test_editor.py -q"],
+        done_definition=["editor loads"],
+        proposed_by="planner",
+        approved=True,
+    )
+    workbench.app_qa(
+        task_id="product-openai-agents-live-retry-1",
+        sprint_id="sprint-1",
+        status="failed",
+        blocker_notes=["palette resets on refresh"],
+    )
+    workbench.app_negotiate(
+        task_id="product-openai-agents-live-retry-1",
+        sprint_id="sprint-1",
+        objections=["timeline entries reset on refresh"],
+    )
+
+    def _fake_revisor(_agent, user_input):
+        payload = json.loads(user_input)
+        assert payload["latest_negotiation_round"]["recommended_action"] == "revise_current_sprint"
+        assert payload["revision_notes"] == ["keep the shell narrow"]
+        return {
+            "revision_summary": "Tighten sprint-1 around palette persistence before broadening the surface.",
+            "must_fix": [
+                "Resolve failing criterion: functionality.",
+                "timeline entries reset on refresh",
+                "palette resets on refresh",
+            ],
+            "must_keep": [
+                "pytest tests/test_editor.py -q",
+                "editor loads",
+                "design_quality",
+            ],
+        }
+
+    _stub_openai_agents_json_runtime(
+        monkeypatch,
+        workbench,
+        responses={"Workbench live revisor": _fake_revisor},
+    )
+
+    payload = workbench.app_retry(
+        task_id="product-openai-agents-live-retry-1",
+        sprint_id="sprint-1",
+        revision_notes=["keep the shell narrow"],
+        use_live_planner=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    assert harness["latest_revision"]["planner_mode"] == "live"
+    assert harness["latest_revision"]["revision_summary"] == (
+        "Tighten sprint-1 around palette persistence before broadening the surface."
+    )
+    assert harness["retry_count"] == 1
+
+
+def test_product_runtime_app_replan_uses_openai_agents_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-replan")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-replan-1",
+        task="Use the openai-agents execution host to replan the sprint after escalation.",
+        target_files=["src/demo.py"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    workbench.app_plan(
+        task_id="product-openai-agents-live-replan-1",
+        prompt="Build a visual pixel-art editor.",
+        title="Pixel Forge",
+        app_type="full_stack_app",
+        stack=["React", "FastAPI"],
+        features=["canvas", "palette"],
+        criteria=["functionality:0.8", "design_quality:0.7"],
+    )
+    workbench.app_sprint(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        goal="Ship the editor shell.",
+        scope=["shell", "canvas"],
+        acceptance_checks=["pytest tests/test_editor.py -q"],
+        done_definition=["editor loads"],
+        proposed_by="planner",
+        approved=True,
+    )
+    workbench.app_qa(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        status="failed",
+        scores=["functionality=0.61", "design_quality=0.79"],
+        blocker_notes=["palette resets on refresh"],
+    )
+    workbench.app_negotiate(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        objections=["timeline entries reset on refresh"],
+    )
+    workbench.app_retry(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        revision_notes=["Focus on palette persistence before broadening the scope."],
+    )
+    workbench.app_generate(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        execution_summary="Patch palette persistence in src/editor.tsx before retrying the evaluator.",
+        changed_target_hints=["src/editor.tsx", "src/state/store.ts"],
+    )
+    workbench.app_qa(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        status="failed",
+        scores=["functionality=0.73", "design_quality=0.81"],
+        summary="Timeline persistence improved, but functionality still fails the evaluator bar.",
+        blocker_notes=["timeline entries still drift after refresh"],
+    )
+    workbench.app_escalate(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        note="retry budget exhausted",
+    )
+
+    def _fake_replanner(_agent, user_input):
+        payload = json.loads(user_input)
+        assert payload["execution_focus"] == "Patch palette persistence in src/editor.tsx before retrying the evaluator."
+        assert payload["latest_execution_attempt"]["changed_target_hints"] == ["src/editor.tsx", "src/state/store.ts"]
+        return {
+            "goal": "Replanned sprint focused on persistence hardening.",
+            "scope": ["src/editor.tsx", "refresh stability"],
+            "acceptance_checks": ["pytest tests/test_editor.py -q"],
+            "done_definition": ["refresh path stays stable", "editor shell remains coherent"],
+            "replan_note": "Narrow the sprint around persistence hardening after the failed execution attempt.",
+        }
+
+    _stub_openai_agents_json_runtime(
+        monkeypatch,
+        workbench,
+        responses={"Workbench live replanner": _fake_replanner},
+    )
+
+    payload = workbench.app_replan(
+        task_id="product-openai-agents-live-replan-1",
+        sprint_id="sprint-1",
+        note="narrow the sprint around persistence",
+        use_live_planner=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    assert harness["active_sprint_contract"]["sprint_id"] == "sprint-1-replan-1"
+    assert harness["active_sprint_contract"]["goal"] == "Replanned sprint focused on persistence hardening."
+    assert harness["active_sprint_contract"]["scope"] == ["src/editor.tsx", "refresh stability"]
+
+
+def test_product_runtime_app_generate_uses_openai_agents_delivery_host_when_requested(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_openai_agents_workbench(tmp_path, monkeypatch, label="product-openai-agents-live-generate")
+    session = workbench._initial_session(
+        task_id="product-openai-agents-live-generate-1",
+        task="Use the openai-agents execution host to run one bounded delivery attempt.",
+        target_files=["notes/plan.md"],
+        validation_commands=["pytest -q"],
+        apply_strategy=False,
+    )
+    save_session(session)
+    workbench.app_plan(
+        task_id="product-openai-agents-live-generate-1",
+        prompt="Coordinate bounded hydration hardening pipeline.",
+        title="Hydration Pipeline",
+        app_type="internal_tool",
+        stack=["SQLite"],
+        features=["hydration audit", "persistence checklist"],
+        criteria=["functionality:0.8", "code_quality:0.6"],
+    )
+    workbench.app_sprint(
+        task_id="product-openai-agents-live-generate-1",
+        sprint_id="sprint-1",
+        goal="Produce one bounded delivery artifact for hydration hardening.",
+        scope=["dist/index.html", "notes/implementation.txt"],
+        acceptance_checks=["python3 scripts/check_dist.py"],
+        done_definition=["delivery artifact exists"],
+        proposed_by="planner",
+        approved=True,
+    )
+    session = load_session(
+        str(tmp_path),
+        "product-openai-agents-live-generate-1",
+        project_scope=workbench._config.project_scope,
+    )
+    assert session is not None and session.app_harness_state is not None and session.app_harness_state.active_sprint_contract is not None
+    session.app_harness_state.active_sprint_contract.acceptance_checks = ["python3 scripts/check_dist.py"]
+    save_session(session)
+    captures: list[dict[str, str]] = []
+    host = workbench._execution_host
+
+    class _FakeAgent:
+        def __init__(self, *, name, instructions, model, tools) -> None:
+            self.name = name
+            self.instructions = instructions
+            self.model = model
+            self.tools = tools
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(agent, user_input):
+            captures.append(
+                {
+                    "name": str(agent.name),
+                    "instructions": str(agent.instructions),
+                    "user_input": str(user_input),
+                }
+            )
+            tools = {tool.__name__: tool for tool in agent.tools}
+            tools["exec_command"](
+                "python3 -c \"from pathlib import Path; Path('dist').mkdir(exist_ok=True); Path('dist/index.html').write_text('<html>hydration ok</html>', encoding='utf-8')\""
+            )
+            tools["write_file"](
+                "src/App.tsx",
+                """
+export function App() {
+  return (
+    <main>
+      <header>
+        <h1>Hydration Pipeline</h1>
+        <p>Bounded persistence hardening run.</p>
+      </header>
+      <section>
+        <h2>Current Lane</h2>
+        <div>Hydration audit and persistence verification.</div>
+      </section>
+      <section>
+        <h2>Checks</h2>
+        <div>Delivery artifact exists and bounded notes are recorded.</div>
+      </section>
+      <footer>
+        <div>Ready for the next constrained retry.</div>
+      </footer>
+    </main>
+  );
+}
+""".strip()
+                + "\n",
+            )
+            tools["write_file"](
+                "scripts/check_dist.py",
+                """
+from pathlib import Path
+
+raise SystemExit(0 if Path("dist/index.html").exists() else 1)
+""".strip()
+                + "\n",
+            )
+            tools["write_file"]("notes/implementation.txt", "bounded hydration hardening attempt\n")
+            return SimpleNamespace(final_output="Build completed and delivery artifact is ready.")
+
+    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
+    monkeypatch.setattr("aionis_workbench.runtime._delivery_bootstrap_family", lambda _spec: "")
+    monkeypatch.setattr(
+        workbench._delivery,
+        "_run_workspace_validation_commands",
+        lambda **_: ValidationResult(
+            ok=True,
+            command="python3 scripts/check_dist.py",
+            exit_code=0,
+            summary="Validation commands passed.",
+            output="",
+            changed_files=["dist/index.html", "notes/implementation.txt"],
+        ),
+    )
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (_FakeAgent, _FakeRunner, lambda fn: fn, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    payload = workbench.app_generate(
+        task_id="product-openai-agents-live-generate-1",
+        sprint_id="sprint-1",
+        use_live_generator=True,
+    )
+
+    harness = payload["canonical_views"]["app_harness"]
+    latest_attempt = harness["latest_execution_attempt"]
+    assert latest_attempt["execution_mode"] == "live"
+    assert latest_attempt["artifact_path"] == "dist/index.html"
+    assert latest_attempt["validation_summary"] == "Validation commands passed."
+    assert latest_attempt["failure_reason"] == ""
+    assert captures[0]["name"] == "Aionis Workbench OpenAI Agents Host"
+    assert "Produce one bounded delivery artifact for hydration hardening." in captures[0]["user_input"]
 
 
 def test_product_inspect_session_derives_reviewer_surface_from_failed_validation(tmp_path, monkeypatch) -> None:

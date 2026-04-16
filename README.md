@@ -11,8 +11,27 @@
 
 This repo uses:
 
-- `deepagents` as the execution substrate
+- `deepagents` as the current default execution substrate
 - `Aionis Core` as the continuity and memory kernel
+
+Execution-host migration toward `openai-agents-python` is planned behind a replaceable host adapter boundary. The current default remains `deepagents`.
+
+Experimental `openai-agents-python` wiring has started behind:
+
+- `WORKBENCH_EXECUTION_HOST=openai_agents`
+- `pip install -e .[openai_agents]`
+- `.github/workflows/workbench-live-openai-agents.yml` for a narrow real-live experimental lane
+
+Current scope is intentionally narrow:
+
+- host selection
+- host metadata
+- auth probe wiring
+- experimental single-agent local tool loop for `build_agent + invoke`
+- experimental delivery loop for `build_delivery_agent + invoke_delivery_task`
+- experimental JSON app-harness live methods for planner/evaluator/negotiator/revisor/replanner/generator
+
+The default execution substrate still remains `deepagents`.
 
 ## Product shape
 
@@ -188,6 +207,22 @@ Current narrow live app harness coverage includes:
 - `tests_real_live_e2e/test_live_ab_test_report.py`
 - `tests_real_live_e2e/test_live_ab_test_second_cycle_report.py`
 - `tests_real_live_e2e/test_live_ab_test_ui_refinement_report.py`
+
+Current experimental `openai_agents` live coverage includes:
+
+- `tests_real_live_e2e/test_live_app_plan.py`
+- `tests_real_live_e2e/test_live_app_qa.py`
+- `tests_real_live_e2e/test_live_app_negotiate.py`
+- `tests_real_live_e2e/test_live_app_retry.py`
+- `tests_real_live_e2e/test_live_app_replan.py`
+- `tests_real_live_e2e/test_live_app_generate.py`
+- `tests_real_live_e2e/test_live_app_escalate.py`
+- `tests_real_live_e2e/test_live_app_replan_generate_qa.py`
+- `tests_real_live_e2e/test_live_app_replan_generate_qa_advance.py`
+
+Manual experimental lane:
+
+- `./scripts/run-real-live-openai-agents-e2e.sh`
 
 Current app harness contract flow now includes:
 

@@ -22,6 +22,11 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_openai import ChatOpenAI
 
 from .config import WorkbenchConfig
+from .execution_host_contract import (
+    DEFAULT_EXECUTION_BACKEND,
+    DEFAULT_EXECUTION_HOST_NAME,
+    DEFAULT_EXECUTION_RUNTIME,
+)
 from .roles import builtin_subagents
 from .tracing import (
     DeliveryComplete,
@@ -290,9 +295,9 @@ class DeepagentsExecutionHost:
         health_status = "available" if supports_live_tasks else "offline"
         health_reason = None if supports_live_tasks else "model_credentials_missing"
         return {
-            "name": "deepagents_local_shell",
-            "execution_runtime": "deepagents",
-            "backend": "LocalShellBackend",
+            "name": DEFAULT_EXECUTION_HOST_NAME,
+            "execution_runtime": DEFAULT_EXECUTION_RUNTIME,
+            "backend": DEFAULT_EXECUTION_BACKEND,
             "model_provider": self._config.provider,
             "model_available": bool(self._config.api_key),
             "supports_live_tasks": supports_live_tasks,
@@ -508,6 +513,8 @@ class DeepagentsExecutionHost:
             "passing_criteria and failing_criteria must contain only criterion names from the provided evaluator criteria. "
             "criteria_scores must be an object mapping criterion names to scores between 0.0 and 1.0. "
             "Keep summary to one sentence. "
+            "Treat requested_status and any explicit criteria_scores as high-signal operator input. "
+            "If requested_status is passed and explicit criteria_scores satisfy the thresholds, preserve that unless blocker_notes or the latest_execution_attempt directly contradict it. "
             "If blocker_notes are present or a criterion falls below its threshold, bias toward failed. "
             "If execution_focus is present, treat it as the highest-signal summary of the most recent bounded execution attempt. "
             "Do not include markdown fences or explanation outside the JSON object."

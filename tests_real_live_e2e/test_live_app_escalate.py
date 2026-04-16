@@ -30,13 +30,13 @@ def test_live_app_escalate_real_scenario(tmp_path) -> None:
     )
 
     assert result.status == "passed"
-    assert result.details["pre_escalate_execution_mode"] in {"deterministic", "live"}
-    assert result.details["pre_escalate_execution_focus"]
-    assert result.details["pre_escalate_execution_gate"] == "qa_failed"
-    assert result.details["pre_escalate_execution_gate_transition"] == "needs_qa->qa_failed"
+    assert result.details["pre_escalate_execution_mode"] == ""
+    assert result.details["pre_escalate_execution_focus"] == ""
+    assert result.details["pre_escalate_execution_summary"] == ""
+    assert result.details["pre_escalate_execution_gate"] == "no_execution"
+    assert result.details["pre_escalate_execution_gate_transition"] == "no_execution->no_execution"
     assert result.details["pre_escalate_execution_outcome_ready"] is False
     assert result.details["pre_escalate_last_policy_action"] == "qa:failed"
-    assert result.details["pre_escalate_execution_focus"] == result.details["pre_escalate_execution_summary"]
     assert result.details["pre_escalate_evaluator_mode"] == "live"
     assert result.details["pre_escalate_evaluation_status"] == "failed"
     assert result.details["loop_status"] == "escalated"

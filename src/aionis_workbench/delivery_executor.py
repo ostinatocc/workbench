@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from .delivery_results import DeliveryExecutionResult
 from .delivery_families import (
@@ -11,6 +11,7 @@ from .delivery_families import (
     infer_delivery_family_from_workspace,
 )
 from .delivery_workspace import DeliveryWorkspaceAdapter
+from .execution_host_contract import ExecutionHostAdapter
 from .failure_classification import classify_execution_failure_reason
 from .recovery_service import ValidationResult
 from .session import SessionState
@@ -23,7 +24,7 @@ class DeliveryExecutor:
     def __init__(
         self,
         *,
-        execution_host: Any,
+        execution_host: ExecutionHostAdapter,
         trace: TraceRecorder,
         workspace: DeliveryWorkspaceAdapter,
         run_validation_commands_fn: Callable[[list[str]], ValidationResult],

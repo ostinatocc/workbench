@@ -1062,6 +1062,7 @@ def test_invoke_delivery_task_retries_once_after_transient_429(tmp_path, monkeyp
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1148,6 +1149,7 @@ def test_invoke_delivery_task_caps_per_model_timeout_separately_from_delivery_ti
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1242,6 +1244,7 @@ def test_invoke_delivery_task_reports_retry_exhaustion_for_transient_overload(tm
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1288,6 +1291,7 @@ def test_build_delivery_agent_disables_model_internal_retries(tmp_path) -> None:
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1379,6 +1383,7 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_no_first_trace_step_ar
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1476,6 +1481,7 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_trace_progress_stalls(
 
     host = DeepagentsExecutionHost(
         config=WorkbenchConfig(
+            execution_host_runtime="deepagents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",

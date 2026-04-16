@@ -16,6 +16,9 @@ dependencies = [
 dev = [
   "pytest>=8",
 ]
+openai_agents = [
+  "openai-agents",
+]
 
 [project.scripts]
 aionis-workbench = "aionis_workbench.cli:main"

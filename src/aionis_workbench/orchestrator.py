@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from .config import AionisConfig, WorkbenchConfig
 from .context_layers import assemble_context_layers
-from .execution_host import DeepagentsExecutionHost
+from .execution_host_contract import ExecutionHostAdapter
 from .policies import (
     build_continuity_snapshot,
     build_delegation_prompt,
@@ -116,7 +116,7 @@ class Orchestrator:
         *,
         workbench_config: WorkbenchConfig,
         aionis_config: AionisConfig,
-        execution_host: DeepagentsExecutionHost,
+        execution_host: ExecutionHostAdapter,
         runtime_host: AionisRuntimeHost,
         trace: TraceRecorder,
         sessions: SessionService,

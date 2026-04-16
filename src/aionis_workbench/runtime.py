@@ -42,7 +42,9 @@ from .delivery_families import (
 from .delivery_results import DeliveryExecutionResult
 from .delivery_workspace import DeliveryWorkspaceAdapter
 from .doc_learning import inspect_doc_target, list_doc_learning_records
-from .execution_host import DeepagentsExecutionHost, ModelInvokeTimeout
+from .execution_host import ModelInvokeTimeout
+from .execution_host_contract import ExecutionHostAdapter
+from .execution_host_factory import build_execution_host
 from .failure_classification import classify_execution_failure_reason
 from .launcher_state import launcher_paths
 from .live_profile import infer_live_mode, load_live_profile_snapshot, resolve_live_profile_snapshot_path
@@ -1120,7 +1122,7 @@ class AionisWorkbench:
         self._aionis = aionis
         self._config = workbench
         self._trace = TraceRecorder()
-        self._execution_host = DeepagentsExecutionHost(
+        self._execution_host: ExecutionHostAdapter = build_execution_host(
             config=self._config,
             trace=self._trace,
         )
