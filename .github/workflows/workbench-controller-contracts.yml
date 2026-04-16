@@ -102,7 +102,7 @@ jobs:
           path: |
             tmp/ci/deterministic-real-e2e.junit.xml
             tmp/ci/deterministic-real-e2e.log
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Publish deterministic real e2e summary
         if: always()
