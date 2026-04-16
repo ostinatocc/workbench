@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stateful Visual Dependency Explorer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3efe7;
+      --panel: #fffaf2;
+      --ink: #10243d;
+      --muted: #6f7d8c;
+      --line: #d8c8ab;
+      --accent: #c95f2d;
+      --accent-soft: #fde2d6;
+      --graph: #174e77;
+      --timeline: #214f44;
+      --shadow: 0 16px 42px rgba(16, 36, 61, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(201, 95, 45, 0.14), transparent 30%),
+        linear-gradient(180deg, #f8f3eb, var(--bg));
+      color: var(--ink);
+    }
+    .app {
+      min-height: 100vh;
+      padding: 24px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+    }
+    .hero, .panel {
+      background: rgba(255, 250, 242, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+    }
+    .hero {
+      padding: 22px 24px 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(28px, 5vw, 52px);
+      line-height: 0.98;
+      max-width: 12ch;
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      background: white;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
+      gap: 18px;
+      min-height: 540px;
+    }
+    .graph-panel {
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 14px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .toolbar input, .toolbar select {
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: white;
+      padding: 12px 14px;
+      font: inherit;
+      min-width: 0;
+    }
+    .toolbar input { flex: 1 1 220px; }
+    .legend {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .graph {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(23, 78, 119, 0.07), rgba(23, 78, 119, 0.01)),
+        repeating-linear-gradient(
+          0deg,
+          transparent 0,
+          transparent 24px,
+          rgba(16, 36, 61, 0.04) 24px,
+          rgba(16, 36, 61, 0.04) 25px
+        );
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      align-content: start;
+    }
+    .node {
+      border: 1px solid rgba(23, 78, 119, 0.18);
+      background: white;
+      border-radius: 16px;
+      min-height: 110px;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .node:hover, .node:focus-visible {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      box-shadow: 0 12px 20px rgba(23, 78, 119, 0.12);
+      outline: none;
+    }
+    .node[data-selected="true"] {
+      border-color: var(--accent);
+      background: linear-gradient(180deg, white, var(--accent-soft));
+    }
+    .node small {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 11px;
+    }
+    .detail-panel {
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 14px;
+    }
+    .detail-panel h2, .timeline-panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+    .detail-card, .timeline-panel {
+      padding: 18px;
+    }
+    .detail-copy {
+      color: var(--muted);
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .timeline-panel {
+      min-height: 180px;
+      display: grid;
+      gap: 14px;
+    }
+    .timeline-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .timeline-list li {
+      border-left: 3px solid var(--timeline);
+      padding: 0 0 0 12px;
+      color: var(--ink);
+    }
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+    }
+    @media (max-width: 900px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <div class="eyebrow">Artifact Trial Demo</div>
+      <h1>Stateful Visual Dependency Explorer</h1>
+      <div class="hero-meta">
+        <span class="chip">task=artifact-trial-smoke-1</span>
+        <span class="chip">sprint=sprint-1</span>
+        <span class="chip">mode=deterministic</span>
+        <span class="chip">summary=Materialize the first visible explorer demo scaffold.</span>
+      </div>
+    </section>
+    <section class="workspace">
+      <section class="hero panel graph-panel">
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Filter nodes, files, or checks" />
+          <select id="category"></select>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="graph" id="graph"></div>
+      </section>
+      <section class="panel detail-panel">
+        <div>
+          <div class="eyebrow">Selected Node</div>
+          <h2 id="detail-title">Choose a graph node</h2>
+        </div>
+        <div class="detail-card">
+          <div class="detail-copy" id="detail-copy">The detail panel and timeline will update together. Selection and filters persist across refresh.</div>
+        </div>
+        <div class="panel timeline-panel">
+          <div class="eyebrow">Timeline Focus</div>
+          <h2 id="timeline-title">No selection yet</h2>
+          <ul class="timeline-list" id="timeline"></ul>
+        </div>
+      </section>
+    </section>
+  </div>
+  <script id="seed" type="application/json">{
+  "title": "Stateful Visual Dependency Explorer",
+  "task_id": "artifact-trial-smoke-1",
+  "sprint_id": "sprint-1",
+  "goal": "Ship the visible explorer shell.",
+  "summary": "Materialize the first visible explorer demo scaffold.",
+  "filters": [
+    "target",
+    "workflow"
+  ],
+  "nodes": [
+    {
+      "id": "node-1",
+      "label": "graph canvas",
+      "category": "workflow",
+      "detail": "graph canvas is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: graph canvas"
+      ]
+    },
+    {
+      "id": "node-2",
+      "label": "detail panel",
+      "category": "workflow",
+      "detail": "detail panel is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: detail panel"
+      ]
+    },
+    {
+      "id": "node-3",
+      "label": "timeline panel",
+      "category": "workflow",
+      "detail": "timeline panel is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: timeline panel"
+      ]
+    },
+    {
+      "id": "node-4",
+      "label": "search/filter bar",
+      "category": "target",
+      "detail": "search/filter bar is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: search/filter bar"
+      ]
+    },
+    {
+      "id": "node-5",
+      "label": "manual smoke",
+      "category": "workflow",
+      "detail": "manual smoke is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: manual smoke"
+      ]
+    },
+    {
+      "id": "node-6",
+      "label": "localStorage persistence",
+      "category": "workflow",
+      "detail": "localStorage persistence is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: localStorage persistence"
+      ]
+    },
+    {
+      "id": "node-7",
+      "label": "Resolve failing criterion: functionality.",
+      "category": "target",
+      "detail": "Resolve failing criterion: functionality. is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: Resolve failing criterion: functionality."
+      ]
+    },
+    {
+      "id": "node-8",
+      "label": "Resolve failing criterion: design_quality.",
+      "category": "target",
+      "detail": "Resolve failing criterion: design_quality. is part of sprint-1 and feeds the bounded execution attempt.",
+      "timeline": [
+        "planned: Ship the visible explorer shell.",
+        "attempt: Materialize the first visible explorer demo scaffold.",
+        "focus: Resolve failing criterion: design_quality."
+      ]
+    }
+  ]
+}</script>
+  <script>
+    const seed = JSON.parse(document.getElementById("seed").textContent);
+    const storageKey = "aionis-artifact-demo:" + seed.task_id + ":" + seed.sprint_id;
+    const graph = document.getElementById("graph");
+    const search = document.getElementById("search");
+    const category = document.getElementById("category");
+    const legend = document.getElementById("legend");
+    const detailTitle = document.getElementById("detail-title");
+    const detailCopy = document.getElementById("detail-copy");
+    const timelineTitle = document.getElementById("timeline-title");
+    const timeline = document.getElementById("timeline");
+
+    const initial = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(storageKey) || "{}");
+      } catch (error) {
+        return {};
+      }
+    })();
+
+    const state = {
+      search: typeof initial.search === "string" ? initial.search : "",
+      category: typeof initial.category === "string" ? initial.category : "all",
+      selectedNodeId: typeof initial.selectedNodeId === "string" ? initial.selectedNodeId : "",
+    };
+
+    function persist() {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    }
+
+    function visibleNodes() {
+      const query = state.search.trim().toLowerCase();
+      return seed.nodes.filter((node) => {
+        const label = String(node.label || "").toLowerCase();
+        const categoryMatch = state.category === "all" || node.category === state.category;
+        const queryMatch = !query || label.includes(query);
+        return categoryMatch && queryMatch;
+      });
+    }
+
+    function ensureSelection(nodes) {
+      if (!nodes.length) {
+        state.selectedNodeId = "";
+        return null;
+      }
+      const current = nodes.find((node) => node.id === state.selectedNodeId);
+      if (current) {
+        return current;
+      }
+      state.selectedNodeId = String(nodes[0].id);
+      persist();
+      return nodes[0];
+    }
+
+    function renderDetail(selected) {
+      if (!selected) {
+        detailTitle.textContent = "No matching node";
+        detailCopy.textContent = "Adjust the search or filter to recover a visible graph path.";
+        timelineTitle.textContent = "No timeline focus";
+        timeline.innerHTML = '<li class="empty">No timeline entries are visible.</li>';
+        return;
+      }
+      detailTitle.textContent = String(selected.label || "Selected node");
+      detailCopy.textContent = String(selected.detail || "No detail available.");
+      timelineTitle.textContent = String(selected.label || "Selected node") + " timeline";
+      const items = Array.isArray(selected.timeline) ? selected.timeline : [];
+      timeline.innerHTML = items.map((item) => "<li>" + item + "</li>").join("") || '<li class="empty">No timeline entries.</li>';
+    }
+
+    function renderLegend() {
+      legend.innerHTML = seed.filters.map((item) => "<span class=\"chip\">" + item + "</span>").join("");
+      category.innerHTML = ['<option value="all">All categories</option>']
+        .concat(seed.filters.map((item) => "<option value=\"" + item + "\">" + item + "</option>"))
+        .join("");
+      category.value = seed.filters.includes(state.category) ? state.category : "all";
+    }
+
+    function renderGraph() {
+      const nodes = visibleNodes();
+      const selected = ensureSelection(nodes);
+      graph.innerHTML = nodes.map((node) => {
+        const selectedFlag = node.id === state.selectedNodeId ? "true" : "false";
+        return `
+          <button class="node" type="button" data-node-id="${node.id}" data-selected="${selectedFlag}">
+            <small>${node.category}</small>
+            <strong>${node.label}</strong>
+            <span>${(node.timeline || [])[0] || seed.goal}</span>
+          </button>
+        `;
+      }).join("") || '<div class="empty">No nodes match the current filter.</div>';
+      graph.querySelectorAll("[data-node-id]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.selectedNodeId = button.getAttribute("data-node-id") || "";
+          persist();
+          renderGraph();
+        });
+      });
+      renderDetail(selected);
+    }
+
+    search.value = state.search;
+    search.addEventListener("input", (event) => {
+      state.search = event.target.value;
+      persist();
+      renderGraph();
+    });
+    category.addEventListener("change", (event) => {
+      state.category = event.target.value;
+      persist();
+      renderGraph();
+    });
+
+    renderLegend();
+    renderGraph();
+  </script>
+</body>
+</html>

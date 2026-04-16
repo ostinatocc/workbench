@@ -1,0 +1,26 @@
+name: Setup Workbench
+description: Set up Python, cache pip downloads, and install workbench dependencies into a local venv.
+
+inputs:
+  python-version:
+    description: Python version to install for the workbench jobs.
+    required: false
+    default: "3.11"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+        cache-dependency-path: |
+          pyproject.toml
+
+    - name: Install workbench dependencies
+      shell: bash
+      run: |
+        python -m venv .venv
+        .venv/bin/pip install -U pip
+        .venv/bin/pip install -e .[dev]

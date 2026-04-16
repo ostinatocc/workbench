@@ -1,0 +1,65 @@
+{
+  "manifest_version": "aionis_real_repo_manifest_v1",
+  "repos": [
+    {
+      "id": "click-python",
+      "repo_url": "https://github.com/pallets/click.git",
+      "commit_sha": "934813e4d421071a1b3db3973c02fe2721359a6e",
+      "language": "python",
+      "default_branch": "main",
+      "scenario_tags": [
+        "publish-recover-resume",
+        "launcher-runtime-cycle",
+        "live-run-resume"
+      ],
+      "validation_commands": [
+        "python -m pytest tests -q"
+      ],
+      "doc_paths": [
+        "docs/index.rst"
+      ],
+      "expected_runtime_mode": "inspect-only"
+    },
+    {
+      "id": "p-limit-ts",
+      "repo_url": "https://github.com/sindresorhus/p-limit.git",
+      "commit_sha": "7d14b3f04aa990f621a853e24e2a4b796baf1ec9",
+      "language": "typescript",
+      "default_branch": "main",
+      "scenario_tags": [
+        "editor-to-dream",
+        "repeated-workflow-reuse",
+        "app-harness-planner-contract",
+        "live-app-plan"
+      ],
+      "validation_commands": [
+        "npm test"
+      ],
+      "doc_paths": [
+        "readme.md"
+      ],
+      "expected_runtime_mode": "inspect-only"
+    },
+    {
+      "id": "vitepress-docs",
+      "repo_url": "https://github.com/vuejs/vitepress.git",
+      "commit_sha": "cb8f5531ce34ce35008ef5043ffaa39e2a2f9c38",
+      "language": "typescript",
+      "default_branch": "main",
+      "scenario_tags": [
+        "editor-to-dream",
+        "repeated-workflow-reuse",
+        "publish-recover-resume",
+        "app-harness-planner-contract",
+        "live-app-plan"
+      ],
+      "validation_commands": [
+        "pnpm test"
+      ],
+      "doc_paths": [
+        "docs/index.md"
+      ],
+      "expected_runtime_mode": "inspect-only"
+    }
+  ]
+}

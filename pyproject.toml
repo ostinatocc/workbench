@@ -1,0 +1,32 @@
+[project]
+name = "aionis-workbench"
+version = "0.1.0"
+description = "Aionis Workbench: a multi-agent product shell that puts Aionis continuity, memory, delegation, and replay at the center."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "deepagents>=0.0.27",
+  "langchain>=0.3.27",
+  "langchain-openai>=0.3.30",
+  "httpx>=0.28.1",
+  "python-dotenv>=1.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+]
+
+[project.scripts]
+aionis-workbench = "aionis_workbench.cli:main"
+aionis = "aionis_workbench.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

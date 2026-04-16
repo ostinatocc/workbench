@@ -1,0 +1,108 @@
+name: Workbench Live E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider-profile:
+        description: Provider profile to use for the live e2e slice.
+        required: true
+        default: zai_glm51_coding
+        type: choice
+        options:
+          - zai_glm51_coding
+          - openai_default
+          - openrouter_default
+
+jobs:
+  live-real-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up workbench
+        uses: ./.github/actions/setup-workbench
+        with:
+          python-version: "3.11"
+
+      - name: Configure provider profile
+        env:
+          INPUT_PROVIDER_PROFILE: ${{ inputs.provider-profile }}
+          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY_SECRET: ${{ secrets.OPENROUTER_API_KEY }}
+        shell: bash
+        run: |
+          {
+            echo "AIONIS_PROVIDER_PROFILE=${INPUT_PROVIDER_PROFILE}"
+            case "${INPUT_PROVIDER_PROFILE}" in
+              zai_glm51_coding)
+                echo "OPENAI_API_KEY=${OPENAI_API_KEY_SECRET}"
+                echo "OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4"
+                echo "WORKBENCH_MODEL=glm-5.1"
+                ;;
+              openai_default)
+                echo "OPENAI_API_KEY=${OPENAI_API_KEY_SECRET}"
+                echo "WORKBENCH_MODEL=gpt-5"
+                ;;
+              openrouter_default)
+                echo "OPENROUTER_API_KEY=${OPENROUTER_API_KEY_SECRET}"
+                echo "OPENROUTER_BASE_URL=https://openrouter.ai/api/v1"
+                echo "OPENROUTER_MODEL=openai/gpt-5.4"
+                ;;
+              *)
+                echo "Unsupported provider profile: ${INPUT_PROVIDER_PROFILE}" >&2
+                exit 1
+                ;;
+            esac
+          } >> "$GITHUB_ENV"
+
+      - name: Preflight live credentials
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          from aionis_workbench.provider_profiles import get_provider_profile, provider_profile_has_required_credentials
+          import os
+
+          provider_id = os.environ["AIONIS_PROVIDER_PROFILE"]
+          profile = get_provider_profile(provider_id)
+          has_credentials = provider_profile_has_required_credentials(profile)
+
+          print("### Live Provider Preflight")
+          print()
+          print(f"- provider_profile: `{profile.provider_id}`")
+          print(f"- provider_label: {profile.label}")
+          print(f"- release_tier: {profile.release_tier}")
+          print(f"- supports_live: {profile.supports_live}")
+          print(f"- has_required_credentials: {has_credentials}")
+
+          if not has_credentials:
+              raise SystemExit("Missing credentials for selected live provider profile.")
+          PY
+
+      - name: Run live real e2e suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p tmp/ci
+          ./scripts/run-real-live-e2e.sh \
+            --junitxml=tmp/ci/live-real-e2e.junit.xml \
+            2>&1 | tee tmp/ci/live-real-e2e.log
+
+      - name: Upload live real e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-real-e2e-${{ inputs.provider-profile }}-artifacts
+          path: |
+            tmp/ci/live-real-e2e.junit.xml
+            tmp/ci/live-real-e2e.log
+          if-no-files-found: error
+
+      - name: Publish live real e2e summary
+        if: always()
+        shell: bash
+        run: |
+          python ./scripts/summarize-junit.py \
+            tmp/ci/live-real-e2e.junit.xml \
+            --title "Live Real E2E" \
+            --allow-missing >> "$GITHUB_STEP_SUMMARY"

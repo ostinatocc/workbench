@@ -1,0 +1,87 @@
+name: Workbench Deterministic CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  controller-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up workbench
+        uses: ./.github/actions/setup-workbench
+        with:
+          python-version: "3.11"
+
+      - name: Run controller contract suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p tmp/ci
+          ./scripts/run-controller-contract-suite.sh \
+            --junitxml=tmp/ci/controller-contracts.junit.xml \
+            2>&1 | tee tmp/ci/controller-contracts.log
+
+      - name: Upload controller contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: controller-contracts-artifacts
+          path: |
+            tmp/ci/controller-contracts.junit.xml
+            tmp/ci/controller-contracts.log
+          if-no-files-found: error
+
+      - name: Publish controller contract summary
+        if: always()
+        shell: bash
+        run: |
+          python ./scripts/summarize-junit.py \
+            tmp/ci/controller-contracts.junit.xml \
+            --title "Controller Contracts" \
+            --allow-missing >> "$GITHUB_STEP_SUMMARY"
+
+  deterministic-real-e2e:
+    runs-on: ubuntu-latest
+    needs: controller-contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up workbench
+        uses: ./.github/actions/setup-workbench
+        with:
+          python-version: "3.11"
+
+      - name: Run deterministic real e2e suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p tmp/ci
+          ./scripts/run-real-e2e.sh \
+            --junitxml=tmp/ci/deterministic-real-e2e.junit.xml \
+            2>&1 | tee tmp/ci/deterministic-real-e2e.log
+
+      - name: Upload deterministic real e2e artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-real-e2e-artifacts
+          path: |
+            tmp/ci/deterministic-real-e2e.junit.xml
+            tmp/ci/deterministic-real-e2e.log
+          if-no-files-found: error
+
+      - name: Publish deterministic real e2e summary
+        if: always()
+        shell: bash
+        run: |
+          python ./scripts/summarize-junit.py \
+            tmp/ci/deterministic-real-e2e.junit.xml \
+            --title "Deterministic Real E2E" \
+            --allow-missing >> "$GITHUB_STEP_SUMMARY"
