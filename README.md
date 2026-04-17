@@ -508,6 +508,12 @@ cd /path/to/workbench
 
 GitHub Actions also exposes a manual [workbench-live-e2e.yml](.github/workflows/workbench-live-e2e.yml) workflow. It lets you choose a provider profile, runs a live credential preflight, then publishes JUnit/log artifacts and a compact live summary for the model-backed slice.
 
+The dedicated [workbench-live-openai-agents.yml](.github/workflows/workbench-live-openai-agents.yml) workflow does the same for the `openai_agents` execution host. It requires matching repository or organization secrets for the selected provider profile, for example:
+
+- `openai_default`: `OPENAI_API_KEY`
+- `openrouter_default`: `OPENROUTER_API_KEY`
+- `zai_glm51_coding`: `OPENAI_API_KEY`
+
 Release-gated deterministic + live check:
 
 ```bash

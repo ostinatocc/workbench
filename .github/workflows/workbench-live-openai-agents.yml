@@ -67,6 +67,11 @@ jobs:
           provider_id = os.environ["AIONIS_PROVIDER_PROFILE"]
           profile = get_provider_profile(provider_id)
           has_credentials = provider_profile_has_required_credentials(profile)
+          missing_env_vars = [
+              name
+              for name in profile.env_var_names
+              if not str(os.environ.get(name, "")).strip()
+          ]
 
           print("### OpenAI Agents Live Provider Preflight")
           print()
@@ -76,9 +81,12 @@ jobs:
           print(f"- supports_live: {profile.supports_live}")
           print(f"- execution_host: `{os.environ.get('WORKBENCH_EXECUTION_HOST', '')}`")
           print(f"- has_required_credentials: {has_credentials}")
+          print(f"- missing_env_vars: `{', '.join(missing_env_vars) or 'none'}`")
 
           if not has_credentials:
-              raise SystemExit("Missing credentials for selected live provider profile.")
+              raise SystemExit(
+                  f"Missing required env for selected live provider profile: {', '.join(missing_env_vars) or 'unknown'}"
+              )
           PY
 
       - name: Run live openai-agents e2e slice
