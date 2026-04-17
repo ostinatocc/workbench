@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up workbench
         uses: ./.github/actions/setup-workbench
@@ -100,7 +100,7 @@ jobs:
 
       - name: Upload live openai-agents artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: live-openai-agents-e2e-${{ inputs.provider-profile }}-artifacts
           path: |

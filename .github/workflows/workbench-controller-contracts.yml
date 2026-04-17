@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up workbench
         uses: ./.github/actions/setup-workbench
@@ -29,7 +29,7 @@ jobs:
 
       - name: Upload controller contract artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: controller-contracts-artifacts
           path: |
@@ -51,10 +51,10 @@ jobs:
     needs: controller-contracts
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout AionisCore
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ostinatocc/AionisCore
           path: AionisCore
@@ -65,7 +65,7 @@ jobs:
           python-version: "3.11"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -96,7 +96,7 @@ jobs:
 
       - name: Upload deterministic real e2e artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deterministic-real-e2e-artifacts
           path: |
