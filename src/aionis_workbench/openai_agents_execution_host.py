@@ -30,6 +30,7 @@ from .execution_host import (
 )
 from .tracing import TraceRecorder
 from .utils import stringify_result
+from .roles import builtin_subagents
 
 OPENAI_AGENTS_EXECUTION_HOST_NAME = "openai_agents_local_shell"
 OPENAI_AGENTS_EXECUTION_RUNTIME = "openai_agents"
@@ -56,6 +57,21 @@ class OpenAIAgentsPreparedAgent:
     timeout_pressure: bool
     use_builtin_subagents: bool
     delivery_mode: bool = False
+
+
+@dataclass
+class OpenAIAgentsInvokeResult:
+    final_output: str
+    delegation_returns: list[dict[str, Any]]
+    role_sequence: list[str]
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return text.strip()
 
 
 def _delivery_invoke_worker(  # type: ignore[no-untyped-def]
@@ -375,6 +391,8 @@ class OpenAIAgentsExecutionHost:
     def _response_text(self, value: Any) -> str:
         if isinstance(value, str):
             return value
+        if isinstance(value, OpenAIAgentsInvokeResult):
+            return value.final_output
         if isinstance(value, list):
             parts: list[str] = []
             for item in value:
@@ -389,6 +407,180 @@ class OpenAIAgentsExecutionHost:
         if content is not None and content is not value:
             return self._response_text(content)
         return str(value)
+
+    def _specialist_specs(self) -> dict[str, dict[str, str]]:
+        return {item["name"]: item for item in builtin_subagents()}
+
+    def _coerce_delegation_packets(self, payload: dict[str, Any], *, memory_sources: list[str]) -> list[dict[str, Any]]:
+        raw_packets = payload.get("delegation_packets")
+        packets: list[dict[str, Any]] = []
+        if isinstance(raw_packets, list):
+            for item in raw_packets:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role") or "").strip()
+                if role not in self._specialist_specs():
+                    continue
+                packets.append(
+                    {
+                        "role": role,
+                        "mission": str(item.get("mission") or "").strip(),
+                        "working_set": [
+                            str(value).strip()
+                            for value in list(item.get("working_set") or [])[:8]
+                            if str(value).strip()
+                        ],
+                        "acceptance_checks": [
+                            str(value).strip()
+                            for value in list(item.get("acceptance_checks") or [])[:6]
+                            if str(value).strip()
+                        ],
+                        "output_contract": str(item.get("output_contract") or "").strip(),
+                    }
+                )
+        if packets:
+            return packets
+        task = ""
+        messages = payload.get("messages")
+        if isinstance(messages, list):
+            for item in messages:
+                if isinstance(item, dict) and str(item.get("role") or "").strip() == "user":
+                    task = str(item.get("content") or "").strip()
+                    if task:
+                        break
+        defaults: list[dict[str, Any]] = []
+        default_working_set = [value.strip() for value in memory_sources[:8] if isinstance(value, str) and value.strip()]
+        for role in ("investigator", "implementer", "verifier"):
+            if role == "investigator":
+                mission = f"Inspect the repository and narrow the likely failure surface for: {task}".strip()
+                output_contract = "Return a concise diagnosis, likely cause, and the narrowest working set."
+            elif role == "implementer":
+                mission = f"Implement the smallest correct change for: {task}".strip()
+                output_contract = "Return the touched files, code-level summary, and follow-up checks."
+            else:
+                mission = f"Validate the attempted fix for: {task}".strip()
+                output_contract = "Return exact validation commands, pass/fail result, and residual risks."
+            defaults.append(
+                {
+                    "role": role,
+                    "mission": mission,
+                    "working_set": list(default_working_set),
+                    "acceptance_checks": [],
+                    "output_contract": output_contract,
+                }
+            )
+        return defaults
+
+    def _specialist_summary(self, text: str) -> tuple[str, list[str]]:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return "No output returned.", []
+        summary = lines[0][:240]
+        evidence = lines[1:4] if len(lines) > 1 else [summary]
+        return summary, evidence[:4]
+
+    def _run_agent_sync(
+        self,
+        *,
+        agent_name: str,
+        instructions: str,
+        model: Any,
+        tools: list[Any],
+        user_input: str,
+        timeout_seconds: float,
+    ) -> Any:
+        Agent, Runner, _, _, _ = self._import_agents_runtime()
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, _timeout_signal_handler)
+        signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+        try:
+            runner_agent = Agent(
+                name=agent_name,
+                instructions=instructions,
+                model=model,
+                tools=tools,
+            )
+            return Runner.run_sync(runner_agent, user_input)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+
+    def _run_builtin_specialists(
+        self,
+        *,
+        agent: OpenAIAgentsPreparedAgent,
+        payload: dict[str, Any],
+        user_input: str,
+        tools: list[Any],
+        timeout_budget: float,
+        model: Any,
+    ) -> dict[str, Any]:
+        packets = self._coerce_delegation_packets(payload, memory_sources=agent.memory_sources)
+        specs = self._specialist_specs()
+        delegation_returns: list[dict[str, Any]] = []
+        role_sequence: list[str] = []
+        for packet in packets:
+            role = packet["role"]
+            spec = specs[role]
+            prior_context: list[str] = []
+            if delegation_returns:
+                prior_context.append("Previous specialist handoffs:")
+                for item in delegation_returns[-2:]:
+                    prior_context.append(f"- {item['role']}: {item['summary']}")
+            packet_context = [
+                f"Role mission: {packet['mission']}",
+                *([f"Working set: {', '.join(packet['working_set'][:8])}"] if packet["working_set"] else []),
+                *([f"Acceptance checks: {'; '.join(packet['acceptance_checks'][:6])}"] if packet["acceptance_checks"] else []),
+                *([f"Output contract: {packet['output_contract']}"] if packet["output_contract"] else []),
+            ]
+            instructions = "\n\n".join(
+                [
+                    agent.system_prompt,
+                    spec["system_prompt"],
+                    *prior_context,
+                    *packet_context,
+                    "Return a concise execution summary first, then the most relevant evidence or commands you used.",
+                    "Use the available local tools directly. Keep your working set narrow and avoid broad rewrites.",
+                ]
+            )
+            result = self._run_agent_sync(
+                agent_name=f"Aionis Workbench {role}",
+                instructions=instructions,
+                model=model,
+                tools=tools,
+                user_input=user_input,
+                timeout_seconds=timeout_budget,
+            )
+            output_text = self._response_text(getattr(result, "final_output", result)).strip()
+            summary, evidence = self._specialist_summary(output_text)
+            run_payload = {
+                "role": role,
+                "status": "success",
+                "summary": summary,
+                "evidence": evidence,
+                "working_set": list(packet["working_set"]),
+                "acceptance_checks": list(packet["acceptance_checks"]),
+            }
+            delegation_returns.append(run_payload)
+            role_sequence.append(role)
+            self._record_tool_result(
+                recorder=self._trace,
+                tool_name="workbench.model",
+                tool_input={
+                    "model": self._config.model,
+                    "role": role,
+                    "messages": len(payload.get("messages") or []),
+                    "tools": len(tools),
+                    "root_dir": agent.root_dir,
+                },
+                result=output_text,
+            )
+        final_output = "\n".join(f"[{item['role']}] {item['summary']}" for item in delegation_returns)
+        return {
+            "final_output": final_output.strip(),
+            "delegation_returns": delegation_returns,
+            "role_sequence": role_sequence,
+        }
 
     def _extract_json_payload(self, text: str) -> dict[str, Any]:
         fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.DOTALL)
@@ -438,7 +630,6 @@ class OpenAIAgentsExecutionHost:
         timeout_seconds: float,
         agent_name: str,
     ) -> dict[str, Any]:
-        Agent, Runner, _, _, _ = self._import_agents_runtime()
         openai_client = self._configure_openai_agents_client()
         previous_handler = signal.getsignal(signal.SIGALRM)
         signal.signal(signal.SIGALRM, _timeout_signal_handler)
@@ -773,43 +964,42 @@ class OpenAIAgentsExecutionHost:
         instructions = agent.system_prompt
         if agent.memory_sources:
             instructions += "\n\nRelevant memory sources:\n" + "\n".join(f"- {value}" for value in agent.memory_sources[:16])
-        if agent.use_builtin_subagents:
-            instructions += (
-                "\n\nBuiltin specialist subagents are not wired in this execution host yet. "
-                "Work as a single orchestrating agent and use the available local tools directly."
-            )
         instructions += (
             "\n\nUse the available local tools to inspect files, edit files, and run commands inside the workspace. "
             "Prefer small, direct edits over broad rewrites."
         )
         timeout_budget = timeout_seconds or self._config.model_timeout_seconds or 45.0
-        previous_handler = signal.getsignal(signal.SIGALRM)
-        signal.signal(signal.SIGALRM, _timeout_signal_handler)
-        signal.setitimer(signal.ITIMER_REAL, timeout_budget)
-        try:
-            runner_agent = Agent(
-                name="Aionis Workbench OpenAI Agents Host",
-                instructions=instructions,
-                model=self._runner_model(openai_client),
+        runner_model = self._runner_model(openai_client)
+        if agent.use_builtin_subagents:
+            return self._run_builtin_specialists(
+                agent=agent,
+                payload=payload,
+                user_input=user_input,
                 tools=tools,
+                timeout_budget=timeout_budget,
+                model=runner_model,
             )
-            result = Runner.run_sync(runner_agent, user_input)
-            final_output = getattr(result, "final_output", result)
-            self._record_tool_result(
-                recorder=self._trace,
-                tool_name="workbench.model",
-                tool_input={
-                    "model": self._config.model,
-                    "messages": len(messages),
-                    "tools": len(tools),
-                    "root_dir": agent.root_dir,
-                },
-                result=final_output,
-            )
-            return final_output
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous_handler)
+        result = self._run_agent_sync(
+            agent_name="Aionis Workbench OpenAI Agents Host",
+            instructions=instructions,
+            model=runner_model,
+            tools=tools,
+            user_input=user_input,
+            timeout_seconds=timeout_budget,
+        )
+        final_output = getattr(result, "final_output", result)
+        self._record_tool_result(
+            recorder=self._trace,
+            tool_name="workbench.model",
+            tool_input={
+                "model": self._config.model,
+                "messages": len(messages),
+                "tools": len(tools),
+                "root_dir": agent.root_dir,
+            },
+            result=final_output,
+        )
+        return final_output
 
     def invoke_delivery_task(
         self,

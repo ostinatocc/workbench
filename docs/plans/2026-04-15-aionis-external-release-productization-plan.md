@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Turn `Aionis Workbench` from a strong internal multi-agent shell into a CLI-first product that can be installed, supported, and released externally with a clear stable surface.
+**Goal:** Turn `Aionis Workbench` from a strong internal task shell into a CLI-first product that can be installed, supported, and released externally with a clear stable surface.
 
-**Architecture:** Treat `workbench/` as the only public product boundary. `runtime-mainline/` becomes a managed runtime dependency behind product commands rather than a user-visible subsystem. Reduce the external contract to a small stable command set, isolate beta/internal surfaces, and build release gates around clean-machine installation, configuration isolation, and predictable support flows.
+**Architecture:** Treat `workbench/` as the only public product boundary. `Aionis Core` becomes a managed runtime dependency behind product commands rather than a user-visible subsystem. Reduce the external contract to a small stable command set, isolate beta/internal surfaces, and build release gates around clean-machine installation, configuration isolation, and predictable support flows.
 
 **Tech Stack:** Python 3.11+, Node 22, `argparse`, `pytest`, provider profiles, shell scripts, release gates, and GitHub Actions or equivalent release CI.
 
@@ -18,6 +18,7 @@
 - deterministic and live validation exist
 - runtime, execution host, and Workbench boundaries are conceptually separated
 - project-scoped learning and recovery are already product-real
+- `openai-agents-python` is now the default execution host
 
 But those strengths are still packaged like an internal engineering workspace instead of an external product.
 
@@ -76,8 +77,8 @@ Externally, the product is `Aionis Workbench`, surfaced through the `aionis` CLI
 
 Implication:
 
-- `runtime-mainline/` is part of implementation and distribution, not part of the user-facing mental model
-- `deepagents-host/` remains an integration boundary, not a public product area
+- `Aionis Core` is part of implementation and distribution, not part of the user-facing mental model
+- the execution-host adapter remains an implementation boundary, not a public product area
 
 ### Decision 2: the CLI must have stable, beta, and internal tiers
 
@@ -121,7 +122,7 @@ flowchart TD
     SURF --> RTM["Managed Runtime Controller"]
     SURF --> EXE["Execution Host Adapter"]
     RTM --> CORE["Aionis Core Runtime"]
-    EXE --> AGENT["deepagents Substrate"]
+    EXE --> AGENT["openai-agents-python"]
     CORE --> STORE["Project-Scoped Continuity Store"]
     SURF --> DIAG["Support + Diagnostics Bundle"]
 ```

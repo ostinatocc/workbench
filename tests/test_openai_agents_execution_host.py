@@ -206,6 +206,7 @@ def test_openai_agents_execution_host_invoke_runs_local_tools_and_records_trace(
         memory_sources=["README.md"],
         timeout_pressure=False,
         root_dir=str(tmp_path),
+        use_builtin_subagents=False,
     )
     output = host.invoke(
         prepared,
@@ -220,6 +221,104 @@ def test_openai_agents_execution_host_invoke_runs_local_tools_and_records_trace(
     assert [step.tool_name for step in trace_steps] == ["read_file", "write_file", "workbench.model"]
     assert isinstance(captured["tools"], list)
     assert {tool.__name__ for tool in captured["tools"]} == {"exec_command", "read_file", "write_file", "list_files"}
+
+
+def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_returns_structured_payload(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+    (tmp_path / "README.md").write_text("seed file\n", encoding="utf-8")
+
+    captures: list[dict[str, str]] = []
+
+    class _FakeAgent:
+        def __init__(self, *, name, instructions, model, tools) -> None:
+            self.name = name
+            self.instructions = instructions
+            self.model = model
+            self.tools = tools
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(agent, user_input):
+            captures.append(
+                {
+                    "name": str(agent.name),
+                    "instructions": str(agent.instructions),
+                    "user_input": str(user_input),
+                }
+            )
+            if "investigator" in str(agent.name).lower():
+                return SimpleNamespace(final_output="Localized the failure in src/demo.py\nRoot cause: export mismatch")
+            if "implementer" in str(agent.name).lower():
+                tools = {tool.__name__: tool for tool in agent.tools}
+                tools["write_file"]("fix.txt", "implemented\n")
+                return SimpleNamespace(final_output="Applied the narrow fix in src/demo.py\nTouched files: src/demo.py")
+            return SimpleNamespace(final_output="Validation passed.\nCommand: python3 -m pytest -q")
+
+    def _fake_function_tool(fn):
+        return fn
+
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (_FakeAgent, _FakeRunner, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    prepared = host.build_agent(
+        system_parts=["system prompt"],
+        memory_sources=["README.md"],
+        timeout_pressure=False,
+        root_dir=str(tmp_path),
+        use_builtin_subagents=True,
+    )
+    output = host.invoke(
+        prepared,
+        {
+            "messages": [{"role": "user", "content": "Repair the export path."}],
+            "delegation_packets": [
+                {
+                    "role": "investigator",
+                    "mission": "Localize the failure.",
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return diagnosis and scope.",
+                },
+                {
+                    "role": "implementer",
+                    "mission": "Apply the narrow fix.",
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return touched files.",
+                },
+                {
+                    "role": "verifier",
+                    "mission": "Validate the fix.",
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return validation result.",
+                },
+            ],
+        },
+    )
+
+    assert isinstance(output, dict)
+    assert output["role_sequence"] == ["investigator", "implementer", "verifier"]
+    assert [item["role"] for item in output["delegation_returns"]] == ["investigator", "implementer", "verifier"]
+    assert output["delegation_returns"][0]["working_set"] == ["src/demo.py"]
+    assert output["delegation_returns"][2]["acceptance_checks"] == ["python3 -m pytest -q"]
+    assert "[investigator] Localized the failure in src/demo.py" in output["final_output"]
+    assert (tmp_path / "fix.txt").read_text(encoding="utf-8") == "implemented\n"
+    assert len(captures) == 3
+    assert "Previous specialist handoffs:" in captures[1]["instructions"]
+    trace_steps = host._trace.export()
+    assert [step.tool_name for step in trace_steps].count("workbench.model") == 3
+    assert [step.tool_name for step in trace_steps].count("write_file") == 1
 
 
 def test_openai_agents_execution_host_build_delivery_agent_marks_delivery_mode(tmp_path, monkeypatch) -> None:

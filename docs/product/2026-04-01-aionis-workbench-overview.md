@@ -11,13 +11,13 @@ Audience:
 
 ## Executive Summary
 
-Aionis Workbench is a multi-agent coding workbench built on top of:
+Aionis Workbench is a task and session shell for long-running repository work built on top of:
 
 - `openai-agents-python` as the execution substrate
 - `Aionis Core` as the continuity and replay kernel
 - `aionis-workbench` as the product control plane
 
-Its core purpose is not just to run agents once, but to make subsequent work in the same project better by carrying forward:
+Its core purpose is not just to run an agent once, but to make subsequent work in the same project better by carrying forward:
 
 - project-scoped memory
 - validated strategies
@@ -43,7 +43,7 @@ Historical validation examples later in this document still reference original i
 
 ## Product Definition
 
-Workbench is a project-scoped multi-agent coding shell that does five things together:
+Workbench is a project-scoped task shell that does five things together:
 
 1. runs and resumes coding tasks
 2. ingests externally completed validated work
@@ -51,10 +51,10 @@ Workbench is a project-scoped multi-agent coding shell that does five things tog
 4. converts failures into reusable recovery state
 5. selects collaboration strategy for later tasks from prior project evidence
 
-It is not a full market-facing product shell yet. Today it is best described as:
+It is not a mass-market end-user product shell yet. Today it is best described as:
 
-- a production-oriented product kernel
-- a CLI-first workbench engine
+- a CLI-first operator shell
+- a production-oriented task controller
 - a structured continuity and collaboration layer on top of `openai-agents-python`
 
 ## External Beta Command Surface

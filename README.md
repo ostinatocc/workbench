@@ -1,30 +1,114 @@
 # Aionis Workbench
 
-`Aionis Workbench` is a product shell for experiencing the largest value of Aionis Core:
+`Aionis Workbench` is a task and session shell for long-running agent work.
 
-- multi-agent continuity
-- delegation packets
-- reusable collaboration patterns
-- shared and private memory lanes
-- promotion and forgetting
-- replay of effective execution patterns
+It sits on top of `Aionis Core` and gives you a stable operator path for:
 
-This repo uses:
+- starting a task against a real repo
+- pausing and resuming work without starting over
+- inspecting session state and controller guidance
+- running review, doc, and app workflows on the same continuity layer
 
-- `openai-agents-python` as the default execution substrate
+This repo now uses:
+
+- `openai-agents-python` as the default execution host
 - `Aionis Core` as the continuity and memory kernel
 
-Execution-host migration has now crossed the host-cutover line: `Workbench` runs on `openai-agents-python`, and the legacy `deepagents` execution path has been removed.
+The execution-host migration has crossed the cutover line: `Workbench` runs on `openai-agents-python`, and the legacy `deepagents` path has been removed.
 
-Current `openai-agents-python` coverage includes:
+## Who This Is For
 
-- host selection
-- host metadata
-- auth probe wiring
-- experimental single-agent local tool loop for `build_agent + invoke`
-- experimental delivery loop for `build_delivery_agent + invoke_delivery_task`
-- experimental JSON app-harness live methods for planner/evaluator/negotiator/revisor/replanner/generator
-- `.github/workflows/workbench-live-openai-agents.yml` for a narrow real-live experimental lane
+Use `Workbench` if you are:
+
+- building or operating coding agents, workflow agents, or task automation systems
+- running long tasks that need `run -> pause -> resume -> review`
+- using `Aionis Core` and need a real controller shell instead of raw runtime APIs
+
+It is not positioned as a mass-market chatbot UI. It is an operator surface for task continuity.
+
+## What It Solves
+
+`Workbench` turns Aionis continuity into an actual working loop:
+
+- every task becomes a session
+- every session has state, controller actions, and recovery paths
+- review, doc, app, and workflow surfaces can run on the same task memory
+- successful execution paths can be resumed, inspected, and reused instead of rebuilt from scratch
+
+## Quickstart
+
+Shortest local install from the `workbench` repo root:
+
+```bash
+bash ./scripts/install-local-aionis.sh
+```
+
+Then use the stable command path:
+
+```bash
+aionis ready --repo-root /absolute/path/to/repo
+aionis run --repo-root /absolute/path/to/repo --task-id task-1 --task "repair the export failure"
+aionis resume --repo-root /absolute/path/to/repo --task-id task-1
+aionis session --repo-root /absolute/path/to/repo --task-id task-1
+aionis status --repo-root /absolute/path/to/repo
+```
+
+The install script always installs the CLI into `.venv`. If it finds a local `Aionis Core` checkout, it also wires runtime dependencies through one of:
+
+- `AIONIS_RUNTIME_ROOT`
+- `AIONIS_CORE_DIR`
+- `../AionisCore`
+- `../AionisRuntime`
+- `../runtime-mainline`
+
+If automatic runtime discovery fails, set it explicitly:
+
+```bash
+export AIONIS_RUNTIME_ROOT=/absolute/path/to/AionisCore
+```
+
+For live-provider flows, also provide a model key such as `OPENROUTER_API_KEY` or the equivalent OpenAI-compatible credentials.
+
+## Stable Surface
+
+Stable commands:
+
+- `init`
+- `doctor`
+- `ready`
+- `status`
+- `run`
+- `resume`
+- `session`
+
+Beta/operator commands:
+
+- `setup`
+- `shell`
+- `live-profile`
+- `compare-family`
+- `recent-tasks`
+- `dashboard`
+- `consolidate`
+
+Advanced operator and research surfaces still exist, but they should not define the default external product story.
+
+## Current Platform Status
+
+Current platform status and release planning:
+
+- [2026-04-03-aionis-workbench-platform-status.md](docs/plans/2026-04-03-aionis-workbench-platform-status.md)
+- [2026-04-03-aionis-workbench-real-e2e-status.md](docs/plans/2026-04-03-aionis-workbench-real-e2e-status.md)
+- [2026-04-03-aionis-workbench-live-reliability-status.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-status.md)
+- [2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md)
+- [2026-04-04-aionis-long-running-app-harness-status.md](docs/plans/2026-04-04-aionis-long-running-app-harness-status.md)
+- [2026-04-15-aionis-external-release-productization-plan.md](docs/plans/2026-04-15-aionis-external-release-productization-plan.md)
+
+Launcher and onboarding guides:
+
+- [2026-04-03-aionis-launcher-guide.md](docs/product/2026-04-03-aionis-launcher-guide.md)
+- [2026-04-03-aionis-provider-setup-guide.md](docs/product/2026-04-03-aionis-provider-setup-guide.md)
+- [2026-04-15-aionis-external-positioning.md](docs/product/2026-04-15-aionis-external-positioning.md)
 
 ## Product shape
 
@@ -101,68 +185,6 @@ Workbench now uses a split control plane internally:
   - local validation/parsing for Workbench-to-Runtime responses
 
 This keeps the external `aionis` product contract stable while letting ops, orchestration, recovery, shell surfaces, and runtime bridge behavior evolve independently.
-
-## Setup
-
-Shortest local developer install from the workspace root:
-
-```bash
-bash ./scripts/install-local-aionis.sh
-```
-
-The local install script now treats this repository as the root. It always installs the Workbench CLI into `.venv`, and will also install runtime dependencies if it can find a local Aionis Core checkout through one of:
-
-- `AIONIS_RUNTIME_ROOT`
-- `AIONIS_CORE_DIR`
-- `../AionisCore`
-- `../AionisRuntime`
-- `../runtime-mainline`
-
-Launcher guide:
-
-- [2026-04-03-aionis-launcher-guide.md](docs/product/2026-04-03-aionis-launcher-guide.md)
-- [2026-04-03-aionis-provider-setup-guide.md](docs/product/2026-04-03-aionis-provider-setup-guide.md)
-- [2026-04-15-aionis-external-positioning.md](docs/product/2026-04-15-aionis-external-positioning.md)
-
-## Recommended External Beta Path
-
-The external beta workflow should lead with the stable command path:
-
-- `aionis ready --repo-root /absolute/path/to/repo`
-- `aionis run --repo-root /absolute/path/to/repo --task-id task-1 --task "..."`
-- `aionis resume --repo-root /absolute/path/to/repo --task-id task-1`
-- `aionis session --repo-root /absolute/path/to/repo --task-id task-1`
-
-Current stable commands:
-
-- `init`
-- `doctor`
-- `ready`
-- `status`
-- `run`
-- `resume`
-- `session`
-
-Current beta commands:
-
-- `setup`
-- `shell`
-- `live-profile`
-- `compare-family`
-- `recent-tasks`
-- `dashboard`
-- `consolidate`
-
-Advanced operator and research surfaces still exist, but should not define the default external product story.
-
-Current platform status:
-
-- [2026-04-03-aionis-workbench-platform-status.md](docs/plans/2026-04-03-aionis-workbench-platform-status.md)
-- [2026-04-03-aionis-workbench-real-e2e-status.md](docs/plans/2026-04-03-aionis-workbench-real-e2e-status.md)
-- [2026-04-03-aionis-workbench-live-reliability-status.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-status.md)
-- [2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md](docs/plans/2026-04-03-aionis-workbench-live-reliability-provider-hygiene-plan.md)
-- [2026-04-04-aionis-long-running-app-harness-status.md](docs/plans/2026-04-04-aionis-long-running-app-harness-status.md)
-- [2026-04-15-aionis-external-release-productization-plan.md](docs/plans/2026-04-15-aionis-external-release-productization-plan.md)
 
 Current app harness operator surfaces:
 

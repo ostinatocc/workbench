@@ -1862,6 +1862,91 @@ def test_product_run_success_surface_wraps_orchestrated_result(tmp_path, monkeyp
     assert payload.aionis["complete"]["status"] == "ok"
 
 
+def test_product_run_persists_structured_host_delegation_returns(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-run-multi-agent")
+
+    class _FakeTaskSession:
+        def __init__(self) -> None:
+            self._state = {"status": "active", "allowed_actions": ["inspect_context", "pause", "complete"], "transition_guards": []}
+
+        def snapshot_state(self) -> dict[str, object]:
+            return dict(self._state)
+
+        def plan_task_start(self, **_: object) -> dict[str, object]:
+            return {
+                "first_action": {"selected_tool": "edit", "next_action": "Start with a narrow investigation."},
+                "decision": {"planner_explanation": "Use the learned repair loop.", "task_family": "task:repair_demo"},
+                "task_context": {
+                    "delegation_learning": {
+                        "learning_summary": {
+                            "task_family": "task:repair_demo",
+                            "matched_records": 2,
+                            "recommendation_count": 1,
+                        }
+                    }
+                },
+            }
+
+        def complete_task(self, **_: object) -> dict[str, object]:
+            self._state = {"status": "completed", "allowed_actions": ["inspect_context"], "transition_guards": []}
+            return {"status": "ok", "replay_run_id": "replay-run-1"}
+
+    monkeypatch.setattr(
+        workbench._orchestrator._runtime_host,
+        "open_task_session",
+        lambda **_: _FakeTaskSession(),
+    )
+    monkeypatch.setattr(workbench._orchestrator._execution_host, "build_agent", lambda **_: object())
+    monkeypatch.setattr(
+        workbench._orchestrator._execution_host,
+        "invoke",
+        lambda *_args, **_kwargs: {
+            "final_output": "[investigator] Narrowed src/demo.py\n[implementer] Patched src/demo.py\n[verifier] Validation passed.",
+            "role_sequence": ["investigator", "implementer", "verifier"],
+            "delegation_returns": [
+                {
+                    "role": "investigator",
+                    "status": "success",
+                    "summary": "Narrowed src/demo.py",
+                    "evidence": ["Root cause isolated to export handling."],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "implementer",
+                    "status": "success",
+                    "summary": "Patched src/demo.py",
+                    "evidence": ["Touched src/demo.py."],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "verifier",
+                    "status": "success",
+                    "summary": "Validation passed.",
+                    "evidence": ["Command: python3 -c \"print('ok')\""],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                },
+            ],
+        },
+    )
+
+    payload = workbench.run(
+        task_id="product-run-multi-agent-1",
+        task="Repair the demo export path.",
+        target_files=["src/demo.py"],
+        validation_commands=["python3 -c \"print('ok')\""],
+    )
+
+    assert payload.session["selected_role_sequence"] == ["investigator", "implementer", "verifier"]
+    assert [item["role"] for item in payload.session["delegation_returns"]] == ["investigator", "implementer", "verifier"]
+    assert payload.session["delegation_returns"][0]["summary"] == "Narrowed src/demo.py"
+    assert payload.session["delegation_returns"][2]["summary"] == "Validation passed."
+    assert payload.canonical_views["task_state"]["status"] == "completed"
+    assert payload.canonical_views["controller"]["status"] == "completed"
+
+
 def test_product_runtime_ship_routes_existing_project_tasks_to_run(tmp_path, monkeypatch) -> None:
     workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-ship-run-route")
 

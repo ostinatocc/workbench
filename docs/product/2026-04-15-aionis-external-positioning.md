@@ -11,7 +11,7 @@ Audience:
 
 ## One-Line Positioning
 
-Aionis is a project-scoped coding workbench that makes repeated work in the same repository start narrower, recover faster, and reuse validated prior work instead of starting from scratch every time.
+Aionis is a project-scoped task and session workbench that makes repeated work in the same repository start narrower, recover faster, and reuse validated prior work instead of starting from scratch every time.
 
 ## Short Product Definition
 
@@ -19,9 +19,9 @@ Aionis is not best positioned as "another coding agent."
 
 It is better positioned as:
 
-- a continuity-first coding workbench
+- a continuity-first task and session workbench
 - a project memory and recovery layer for software work
-- a CLI-first product for teams and power users doing repeated work in one codebase
+- a CLI-first controller shell for teams and power users doing repeated work in one codebase
 
 The key idea is simple:
 

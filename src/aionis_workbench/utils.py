@@ -13,6 +13,9 @@ def stringify_result(result: Any) -> str:
     if isinstance(result, str):
         return result.strip()
     if isinstance(result, dict):
+        final_output = result.get("final_output")
+        if isinstance(final_output, str) and final_output.strip():
+            return final_output.strip()
         messages = result.get("messages")
         if isinstance(messages, list):
             for message in reversed(messages):

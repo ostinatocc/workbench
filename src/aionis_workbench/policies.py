@@ -2038,6 +2038,7 @@ def promote_insights(
     session: SessionState,
     trace_steps: list[TraceStep],
     content: str,
+    delegation_returns: list[DelegationReturn] | None = None,
     validation_ok: bool | None = None,
     validation_command: str | None = None,
     validation_summary: str | None = None,
@@ -2060,15 +2061,18 @@ def promote_insights(
         if item not in session.promoted_insights:
             session.promoted_insights.append(item)
 
-    session.delegation_returns = _build_delegation_returns(
-        session=session,
-        trace_steps=trace_steps,
-        content=content,
-        validation_ok=validation_ok,
-        validation_command=validation_command,
-        validation_summary=validation_summary,
-        changed_files=relevant_changed_files,
-    )
+    if delegation_returns:
+        session.delegation_returns = delegation_returns
+    else:
+        session.delegation_returns = _build_delegation_returns(
+            session=session,
+            trace_steps=trace_steps,
+            content=content,
+            validation_ok=validation_ok,
+            validation_command=validation_command,
+            validation_summary=validation_summary,
+            changed_files=relevant_changed_files,
+        )
     session.collaboration_patterns = _build_collaboration_patterns(
         session=session,
         delegation_returns=session.delegation_returns,

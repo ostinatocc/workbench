@@ -25,7 +25,7 @@ from .reviewer_contracts import (
     evolution_review_pack_summary_from_runtime,
 )
 from .runtime_bridge_host import AionisRuntimeHost
-from .session import SessionState, load_session
+from .session import DelegationReturn, SessionState, load_session
 from .session_service import SessionService
 from .tracing import TraceRecorder, extract_target_files
 from .utils import stringify_result
@@ -98,6 +98,55 @@ def _build_failure_handoff(
         lines.append("Recent steps:")
         lines.extend(recent)
     return "\n".join(lines)
+
+
+def _extract_host_delegation_returns(payload: Any) -> list[DelegationReturn]:
+    if not isinstance(payload, dict):
+        return []
+    raw_items = payload.get("delegation_returns")
+    if not isinstance(raw_items, list):
+        return []
+    parsed: list[DelegationReturn] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip()
+        status = str(item.get("status") or "").strip() or "success"
+        summary = str(item.get("summary") or "").strip()
+        if not role or not summary:
+            continue
+        parsed.append(
+            DelegationReturn(
+                role=role,
+                status=status,
+                summary=summary,
+                evidence=[
+                    str(value).strip()
+                    for value in list(item.get("evidence") or [])[:4]
+                    if str(value).strip()
+                ],
+                working_set=[
+                    str(value).strip()
+                    for value in list(item.get("working_set") or [])[:8]
+                    if str(value).strip()
+                ],
+                acceptance_checks=[
+                    str(value).strip()
+                    for value in list(item.get("acceptance_checks") or [])[:6]
+                    if str(value).strip()
+                ],
+            )
+        )
+    return parsed
+
+
+def _extract_host_role_sequence(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("role_sequence")
+    if not isinstance(raw, list):
+        return []
+    return [str(value).strip() for value in raw[:3] if str(value).strip()]
 
 
 @dataclass
@@ -308,7 +357,13 @@ class Orchestrator:
             prompt_parts.append("Validation commands:\n" + "\n".join(f"- {value}" for value in session.validation_commands[:6]))
         agent = self._build_agent(session, prompt_parts)
         try:
-            result = self._execution_host.invoke(agent, {"messages": [{"role": "user", "content": task}]})
+            result = self._execution_host.invoke(
+                agent,
+                {
+                    "messages": [{"role": "user", "content": task}],
+                    "delegation_packets": [packet.__dict__ for packet in session.delegation_packets],
+                },
+            )
         except Exception as exc:
             trace_steps = self._trace.export()
             inferred_files = extract_target_files(trace_steps, repo_root=self._config.repo_root)
@@ -357,6 +412,10 @@ class Orchestrator:
                 )
             ) from exc
 
+        host_delegation_returns = _extract_host_delegation_returns(result)
+        host_role_sequence = _extract_host_role_sequence(result)
+        if host_role_sequence:
+            session.selected_role_sequence = host_role_sequence
         content = stringify_result(result)
         session.last_result_preview = _result_preview(content)
         trace_steps = self._trace.export()
@@ -375,6 +434,7 @@ class Orchestrator:
             session=session,
             trace_steps=trace_steps,
             content=content,
+            delegation_returns=host_delegation_returns or None,
             validation_ok=validation.ok,
             validation_command=validation.command,
             validation_summary=validation.summary,
@@ -813,7 +873,13 @@ class Orchestrator:
             prompt_parts.append("Validation commands:\n" + "\n".join(f"- {value}" for value in session.validation_commands[:6]))
         agent = self._build_agent(session, prompt_parts)
         try:
-            result = self._execution_host.invoke(agent, {"messages": [{"role": "user", "content": task}]})
+            result = self._execution_host.invoke(
+                agent,
+                {
+                    "messages": [{"role": "user", "content": task}],
+                    "delegation_packets": [packet.__dict__ for packet in session.delegation_packets],
+                },
+            )
         except Exception as exc:
             trace_steps = self._trace.export()
             inferred_files = extract_target_files(trace_steps, repo_root=self._config.repo_root)
@@ -861,6 +927,10 @@ class Orchestrator:
                     indent=2,
                 )
             ) from exc
+        host_delegation_returns = _extract_host_delegation_returns(result)
+        host_role_sequence = _extract_host_role_sequence(result)
+        if host_role_sequence:
+            session.selected_role_sequence = host_role_sequence
         content = stringify_result(result)
         session.last_result_preview = _result_preview(content)
         trace_steps = self._trace.export()
@@ -879,6 +949,7 @@ class Orchestrator:
             session=session,
             trace_steps=trace_steps,
             content=content,
+            delegation_returns=host_delegation_returns or None,
             validation_ok=validation.ok,
             validation_command=validation.command,
             validation_summary=validation.summary,
