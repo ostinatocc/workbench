@@ -141,6 +141,10 @@ class RoutingSignalSummary:
     implementer_artifact_scope: list[str] = field(default_factory=list)
     implementer_scope_narrowed: bool = False
     implementer_scope_source: str = ""
+    specialist_handoff_chain: list[str] = field(default_factory=list)
+    specialist_next_actions: list[str] = field(default_factory=list)
+    verifier_blockers: list[str] = field(default_factory=list)
+    verifier_validation_intent: list[str] = field(default_factory=list)
     hit_roles: list[str] = field(default_factory=list)
     miss_roles: list[str] = field(default_factory=list)
     routing_reasons: list[str] = field(default_factory=list)

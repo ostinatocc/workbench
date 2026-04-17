@@ -1911,6 +1911,9 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
                     "evidence": ["Root cause isolated to export handling."],
                     "working_set": ["src/demo.py"],
                     "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "handoff_target": "implementer",
+                    "next_action": "Hand off to implementer and keep the implementation inside src/demo.py.",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
                 },
                 {
                     "role": "implementer",
@@ -1920,6 +1923,9 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
                     "working_set": ["src/demo.py"],
                     "acceptance_checks": ["python3 -c \"print('ok')\""],
                     "artifact_refs": [".aionis-workbench/artifacts/investigator.json"],
+                    "handoff_target": "verifier",
+                    "next_action": "Hand off to verifier and run targeted validation: python3 -c \"print('ok')\"",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
                 },
                 {
                     "role": "verifier",
@@ -1928,6 +1934,9 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
                     "evidence": ["Command: python3 -c \"print('ok')\""],
                     "working_set": ["src/demo.py"],
                     "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "handoff_target": "orchestrator",
+                    "next_action": "Report the validated fix back to the orchestrator and keep the task ready for completion.",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
                 },
             ],
         },
@@ -1945,6 +1954,9 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
     assert payload.session["delegation_returns"][0]["summary"] == "Narrowed src/demo.py"
     assert payload.session["delegation_returns"][2]["summary"] == "Validation passed."
     assert payload.session["delegation_returns"][0]["handoff_text"].startswith("investigator summary:")
+    assert payload.session["delegation_returns"][0]["handoff_target"] == "implementer"
+    assert payload.session["delegation_returns"][1]["next_action"].startswith("Hand off to verifier")
+    assert payload.session["delegation_returns"][2]["validation_intent"] == ['python3 -c "print(\'ok\')"']
     implementer_packet = next(item for item in payload.session["delegation_packets"] if item["role"] == "implementer")
     assert implementer_packet["working_set"] == ["src/demo.py"]
     assert any(item.endswith("/investigator.json") for item in implementer_packet["preferred_artifact_refs"])
@@ -1959,12 +1971,27 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
     ]
     assert payload.canonical_views["routing"]["summary"]["implementer_scope_narrowed"] is True
     assert payload.canonical_views["routing"]["summary"]["implementer_scope_source"] == "investigator_narrowed"
+    assert payload.canonical_views["routing"]["summary"]["specialist_handoff_chain"] == [
+        "investigator->implementer",
+        "implementer->verifier",
+        "verifier->orchestrator",
+    ]
+    assert payload.canonical_views["routing"]["summary"]["specialist_next_actions"][1].startswith(
+        "implementer: Hand off to verifier"
+    )
+    assert payload.canonical_views["routing"]["summary"]["verifier_validation_intent"] == ['python3 -c "print(\'ok\')"']
     assert payload.session["continuity_snapshot"]["implementer_effective_scope"] == ["src/demo.py"]
     assert any(
         item.endswith("/investigator.json")
         for item in payload.session["continuity_snapshot"]["implementer_artifact_scope"]
     )
     assert payload.session["continuity_snapshot"]["implementer_scope_source"] == "investigator_narrowed"
+    assert payload.session["continuity_snapshot"]["specialist_handoff_chain"] == [
+        "investigator->implementer",
+        "implementer->verifier",
+        "verifier->orchestrator",
+    ]
+    assert payload.session["continuity_snapshot"]["verifier_validation_intent"] == ['python3 -c "print(\'ok\')"']
 
 
 def test_product_run_blocks_completion_when_verifier_reports_failure(tmp_path, monkeypatch) -> None:

@@ -135,15 +135,35 @@ def _extract_host_delegation_returns(payload: Any) -> list[DelegationReturn]:
             for value in list(item.get("artifact_refs") or [])[:6]
             if str(value).strip()
         ]
+        handoff_target = str(item.get("handoff_target") or "").strip()
+        next_action = str(item.get("next_action") or "").strip()
+        blockers = [
+            str(value).strip()
+            for value in list(item.get("blockers") or [])[:4]
+            if str(value).strip()
+        ]
+        validation_intent = [
+            str(value).strip()
+            for value in list(item.get("validation_intent") or [])[:4]
+            if str(value).strip()
+        ]
         handoff_text = str(item.get("handoff_text") or "").strip()
         if not handoff_text:
             handoff_lines = [f"{role} summary: {summary}"]
+            if handoff_target:
+                handoff_lines.append("Next role: " + handoff_target)
+            if next_action:
+                handoff_lines.append("Next action: " + next_action)
             if working_set:
                 handoff_lines.append("Working set: " + ", ".join(working_set[:8]))
             if acceptance_checks:
                 handoff_lines.append("Acceptance checks: " + "; ".join(acceptance_checks[:6]))
             if artifact_refs:
                 handoff_lines.append("Artifact scope: " + "; ".join(artifact_refs[:4]))
+            if validation_intent:
+                handoff_lines.append("Validation intent: " + "; ".join(validation_intent[:3]))
+            if blockers:
+                handoff_lines.append("Blockers: " + "; ".join(blockers[:3]))
             if evidence:
                 handoff_lines.extend(f"Evidence: {value}" for value in evidence[:3])
             handoff_text = "\n".join(handoff_lines)
@@ -156,6 +176,10 @@ def _extract_host_delegation_returns(payload: Any) -> list[DelegationReturn]:
                 working_set=working_set,
                 acceptance_checks=acceptance_checks,
                 artifact_refs=artifact_refs,
+                handoff_target=handoff_target,
+                next_action=next_action,
+                blockers=blockers,
+                validation_intent=validation_intent,
                 handoff_text=handoff_text,
             )
         )

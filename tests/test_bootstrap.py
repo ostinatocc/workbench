@@ -41,7 +41,8 @@ langchain_core_messages.ToolMessage = type("ToolMessage", (), {"status": "succes
 sys.modules.setdefault("langchain_core.messages", langchain_core_messages)
 
 from aionis_workbench.runtime import AionisWorkbench, ValidationResult
-from aionis_workbench.execution_packet import InstrumentationSummary
+from aionis_workbench.execution_packet import InstrumentationSummary, RoutingSignalSummary
+from aionis_workbench.policies import refresh_delegation_packets
 from aionis_workbench.session import (
     ArtifactReference,
     CollaborationPattern,
@@ -896,6 +897,99 @@ def test_initial_session_reuses_effective_edit_scope_for_implementer_packets(tmp
     assert implementer_packet.preferred_artifact_refs == [".aionis-workbench/artifacts/investigator.json"]
     assert session.continuity_snapshot["prior_strategy_working_sets"][0] == "src/demo.py"
     assert ".aionis-workbench/artifacts/investigator.json" in session.continuity_snapshot["prior_artifact_refs"]
+
+
+def test_refresh_selected_strategy_uses_specialist_retry_guidance_for_failed_runs(tmp_path, monkeypatch) -> None:
+    _seed_python_repo(tmp_path)
+    monkeypatch.setenv("AIONIS_BASE_URL", "http://127.0.0.1:3101")
+
+    workbench = AionisWorkbench(repo_root=str(tmp_path))
+    broad_command = "PYTHONPATH=src python3 -m pytest -q"
+    retry_command = "PYTHONPATH=src python3 -m pytest tests/test_demo.py -q"
+    blocker = "tests/test_demo.py::test_demo failed while validating the export path."
+    prior = workbench._initial_session(
+        task_id="demo-retry-guidance-prior",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=[broad_command],
+        apply_strategy=False,
+    )
+    prior.status = "needs_attention"
+    prior.selected_task_family = "task:repair-demo"
+    prior.selected_trust_signal = "same_task_family"
+    prior.selected_family_scope = "same_task_family"
+    prior.selected_strategy_profile = "family_reuse_loop"
+    prior.selected_validation_style = "targeted_first"
+    prior.selected_role_sequence = ["investigator", "implementer", "verifier"]
+    prior.routing_signal_summary = RoutingSignalSummary(
+        task_family="task:repair-demo",
+        family_scope="same_task_family",
+        implementer_effective_scope=["src/demo.py"],
+        implementer_scope_narrowed=True,
+        implementer_scope_source="investigator",
+        specialist_next_actions=[
+            "Narrow the fix to src/demo.py before widening context.",
+            f"Revise the patch and rerun: {retry_command}",
+        ],
+        verifier_blockers=[blocker],
+        verifier_validation_intent=[retry_command],
+    )
+    prior.continuity_snapshot = {
+        "implementer_effective_scope": ["src/demo.py"],
+        "verifier_validation_intent": [retry_command],
+        "verifier_blockers": [blocker],
+        "specialist_next_actions": [
+            "Narrow the fix to src/demo.py before widening context.",
+            f"Revise the patch and rerun: {retry_command}",
+        ],
+    }
+    prior.delegation_returns = [
+        DelegationReturn(
+            role="implementer",
+            status="success",
+            summary="Patched src/demo.py but verification still failed.",
+            working_set=["src/demo.py"],
+            next_action=f"Revise the patch and rerun: {retry_command}",
+        ),
+        DelegationReturn(
+            role="verifier",
+            status="error",
+            summary="Targeted validation failed.",
+            blockers=[blocker],
+            validation_intent=[retry_command],
+            next_action=f"Revise the patch and rerun: {retry_command}",
+        ),
+    ]
+    save_session(prior)
+
+    session = workbench._initial_session(
+        task_id="demo-retry-guidance-current",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=[broad_command],
+        apply_strategy=False,
+    )
+    session.last_validation_result = {
+        "ok": False,
+        "command": broad_command,
+        "exit_code": 1,
+        "summary": blocker,
+        "output": blocker,
+        "changed_files": ["src/demo.py"],
+    }
+
+    workbench._refresh_selected_strategy(session)
+    refresh_delegation_packets(session)
+
+    implementer_packet = next(packet for packet in session.delegation_packets if packet.role == "implementer")
+    verifier_packet = next(packet for packet in session.delegation_packets if packet.role == "verifier")
+
+    assert session.strategy_summary is not None
+    assert session.strategy_summary.selected_working_set == ["src/demo.py"]
+    assert session.strategy_summary.selected_validation_paths[0] == retry_command
+    assert "Selected retry scope" in session.strategy_summary.explanation
+    assert implementer_packet.working_set == ["src/demo.py"]
+    assert verifier_packet.acceptance_checks[0] == retry_command
 
 
 def test_manual_consolidation_summarizes_recent_project_learning(tmp_path, monkeypatch) -> None:

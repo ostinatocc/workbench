@@ -8,6 +8,7 @@ from .context_layers import assemble_context_layers
 from .controller_shell import controller_action_bar_payload
 from .dream_service import DreamService
 from .evaluation_service import EvaluationService
+from .execution_packet import StrategySummary
 from .policies import (
     build_continuity_snapshot,
     promote_insights,
@@ -300,6 +301,35 @@ class SurfaceService:
         session.selected_family_candidate_count = strategy.family_candidate_count
         session.selected_role_sequence = strategy.role_sequence[:3]
         session.selected_pattern_summaries = strategy.selected_pattern_summaries[:4]
+        retry_explanation_lines = [
+            line
+            for line in strategy.memory_lines
+            if line.startswith(
+                (
+                    "Selected retry scope",
+                    "Selected verifier retry path",
+                    "Retry blockers",
+                    "Specialist retry next action",
+                )
+            )
+        ]
+        explanation_lines = list(dict.fromkeys([*strategy.memory_lines[:2], *retry_explanation_lines, *strategy.memory_lines[2:4]]))[:4]
+        session.strategy_summary = StrategySummary(
+            trust_signal=strategy.trust_signal,
+            strategy_profile=session.selected_strategy_profile,
+            validation_style=session.selected_validation_style,
+            task_family=strategy.task_family,
+            family_scope=strategy.family_scope,
+            family_candidate_count=strategy.family_candidate_count,
+            selected_working_set=self._sessions.normalize_target_files(strategy.selected_working_set or effective_target_files)[:8],
+            selected_validation_paths=self._sessions.normalize_validation_commands(strategy.validation_commands)[:4],
+            selected_role_sequence=strategy.role_sequence[:3],
+            preferred_artifact_refs=strategy.preferred_artifacts[: strategy.artifact_limit],
+            selected_pattern_summaries=strategy.selected_pattern_summaries[:4],
+            artifact_budget=strategy.artifact_limit,
+            memory_source_limit=strategy.memory_source_limit,
+            explanation="; ".join(explanation_lines)[:400],
+        )
         family_prior = self._load_family_prior(
             self._repo_root,
             self._project_scope,
@@ -312,6 +342,9 @@ class SurfaceService:
                 session.selected_strategy_profile = prior_strategy_profile
             if prior_validation_style:
                 session.selected_validation_style = prior_validation_style
+        if session.strategy_summary:
+            session.strategy_summary.strategy_profile = session.selected_strategy_profile
+            session.strategy_summary.validation_style = session.selected_validation_style
 
     def record_learning(self, *, session: SessionState, source: str, validation: ValidationResult, auto_absorbed: bool) -> None:
         if not validation.ok:

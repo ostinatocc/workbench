@@ -41,6 +41,10 @@ class DelegationReturn:
     working_set: list[str] = field(default_factory=list)
     acceptance_checks: list[str] = field(default_factory=list)
     artifact_refs: list[str] = field(default_factory=list)
+    handoff_target: str = ""
+    next_action: str = ""
+    blockers: list[str] = field(default_factory=list)
+    validation_intent: list[str] = field(default_factory=list)
     handoff_text: str = ""
 
 

@@ -11,8 +11,9 @@ def _latest_verifier_result(session: SessionState) -> dict[str, str]:
             return {
                 "status": str(item.status or "").strip(),
                 "summary": str(item.summary or "").strip(),
+                "blocker": str((item.blockers or [""])[0] or "").strip(),
             }
-    return {"status": "", "summary": ""}
+    return {"status": "", "summary": "", "blocker": ""}
 
 
 def session_completion_gates(session: SessionState) -> dict[str, str]:
@@ -22,12 +23,13 @@ def session_completion_gates(session: SessionState) -> dict[str, str]:
     verifier = _latest_verifier_result(session)
     verifier_status = verifier["status"]
     verifier_summary = verifier["summary"]
+    verifier_blocker = verifier["blocker"]
     verifier_expected = bool(session.selected_role_sequence and "verifier" in session.selected_role_sequence) or bool(
         verifier_status or verifier_summary
     )
 
     if verifier_status and verifier_status != "success":
-        detail = verifier_summary or "verifier reported unresolved issues"
+        detail = verifier_summary or verifier_blocker or "verifier reported unresolved issues"
         return {"complete": detail}
     if validation_ok is False:
         summary = str(validation.get("summary") or "").strip()

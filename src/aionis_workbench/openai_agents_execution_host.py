@@ -708,19 +708,114 @@ class OpenAIAgentsExecutionHost:
         acceptance_checks: list[str],
         artifact_refs: list[str],
         routing_reason: str,
+        handoff_target: str,
+        next_action: str,
+        blockers: list[str],
+        validation_intent: list[str],
     ) -> str:
         lines = [f"{role} summary: {summary}"]
+        if handoff_target:
+            lines.append("Next role: " + handoff_target)
+        if next_action:
+            lines.append("Next action: " + next_action)
         if working_set:
             lines.append("Working set: " + ", ".join(working_set[:8]))
         if acceptance_checks:
             lines.append("Acceptance checks: " + "; ".join(acceptance_checks[:6]))
         if artifact_refs:
             lines.append("Artifact scope: " + "; ".join(artifact_refs[:4]))
+        if validation_intent:
+            lines.append("Validation intent: " + "; ".join(validation_intent[:3]))
+        if blockers:
+            lines.append("Blockers: " + "; ".join(blockers[:3]))
         if routing_reason:
             lines.append("Routing reason: " + routing_reason)
         if evidence:
             lines.extend(f"Evidence: {item}" for item in evidence[:3])
         return "\n".join(lines)
+
+    def _specialist_handoff_target(self, role: str) -> str:
+        if role == "investigator":
+            return "implementer"
+        if role == "implementer":
+            return "verifier"
+        if role == "verifier":
+            return "orchestrator"
+        return ""
+
+    def _specialist_blockers(
+        self,
+        *,
+        role: str,
+        summary: str,
+        evidence: list[str],
+        output_text: str,
+    ) -> list[str]:
+        candidate_lines = [summary, *evidence]
+        candidate_lines.extend(
+            line.strip()
+            for line in output_text.splitlines()
+            if isinstance(line, str) and line.strip()
+        )
+        blockers: list[str] = []
+        for line in candidate_lines:
+            lowered = line.lower()
+            if any(
+                token in lowered
+                for token in ("fail", "error", "block", "risk", "unresolved", "missing", "timeout")
+            ):
+                blockers.append(line[:220])
+        if role == "verifier" and summary and "pass" not in summary.lower() and not blockers:
+            blockers.append(summary[:220])
+        return list(dict.fromkeys(value for value in blockers if value))[:3]
+
+    def _specialist_validation_intent(
+        self,
+        *,
+        role: str,
+        acceptance_checks: list[str],
+        evidence: list[str],
+    ) -> list[str]:
+        if acceptance_checks:
+            return list(dict.fromkeys(value for value in acceptance_checks if value))[:3]
+        if role == "verifier":
+            commands = [
+                item.split(":", 1)[1].strip()
+                for item in evidence
+                if item.lower().startswith("command:")
+            ]
+            return list(dict.fromkeys(value for value in commands if value))[:3]
+        return []
+
+    def _specialist_next_action(
+        self,
+        *,
+        role: str,
+        status: str,
+        working_set: list[str],
+        acceptance_checks: list[str],
+        blockers: list[str],
+        handoff_target: str,
+    ) -> str:
+        narrowed_scope = ", ".join(working_set[:3]) if working_set else ""
+        primary_check = acceptance_checks[0] if acceptance_checks else ""
+        if role == "investigator":
+            if narrowed_scope:
+                return f"Hand off to {handoff_target} and keep the implementation inside {narrowed_scope}."
+            return f"Hand off to {handoff_target} and keep the implementation scope narrow."
+        if role == "implementer":
+            if primary_check:
+                return f"Hand off to {handoff_target} and run targeted validation: {primary_check}"
+            return f"Hand off to {handoff_target} and validate the patch against the delegated checks."
+        if role == "verifier":
+            if status == "success":
+                return "Report the validated fix back to the orchestrator and keep the task ready for completion."
+            if primary_check:
+                return f"Revise the fix and rerun the verifier path: {primary_check}"
+            if blockers:
+                return f"Revise the fix to address: {blockers[0]}"
+            return "Revise the fix and rerun the targeted verifier path."
+        return ""
 
     def _run_agent_sync(
         self,
@@ -812,7 +907,10 @@ class OpenAIAgentsExecutionHost:
                     spec["system_prompt"],
                     *prior_context,
                     *packet_context,
-                    "Return a concise execution summary first, then the most relevant evidence or commands you used.",
+                    (
+                        "Return a concise execution summary first, then the most relevant evidence or commands you used. "
+                        "Make the output handoff-ready by making blockers, next action, and validation intent explicit when relevant."
+                    ),
                     (
                         "Use the available local tools directly. "
                         "Investigator and verifier must not edit files. "
@@ -830,6 +928,27 @@ class OpenAIAgentsExecutionHost:
             )
             output_text = self._response_text(getattr(result, "final_output", result)).strip()
             summary, evidence = self._specialist_summary(output_text)
+            handoff_target = self._specialist_handoff_target(role)
+            blockers = self._specialist_blockers(
+                role=role,
+                summary=summary,
+                evidence=evidence,
+                output_text=output_text,
+            )
+            validation_intent = self._specialist_validation_intent(
+                role=role,
+                acceptance_checks=list(packet["acceptance_checks"]),
+                evidence=evidence,
+            )
+            derived_status = "error" if role == "verifier" and blockers and "pass" not in summary.lower() else "success"
+            next_action = self._specialist_next_action(
+                role=role,
+                status=derived_status,
+                working_set=list(effective_working_set),
+                acceptance_checks=list(packet["acceptance_checks"]),
+                blockers=blockers,
+                handoff_target=handoff_target,
+            )
             handoff_text = self._build_specialist_handoff_text(
                 role=role,
                 summary=summary,
@@ -838,15 +957,23 @@ class OpenAIAgentsExecutionHost:
                 acceptance_checks=list(packet["acceptance_checks"]),
                 artifact_refs=list(packet["preferred_artifact_refs"]),
                 routing_reason=str(packet["routing_reason"] or ""),
+                handoff_target=handoff_target,
+                next_action=next_action,
+                blockers=blockers,
+                validation_intent=validation_intent,
             )
             run_payload = {
                 "role": role,
-                "status": "success",
+                "status": derived_status,
                 "summary": summary,
                 "evidence": evidence,
                 "working_set": list(effective_working_set),
                 "acceptance_checks": list(packet["acceptance_checks"]),
                 "artifact_refs": list(packet["preferred_artifact_refs"]),
+                "handoff_target": handoff_target,
+                "next_action": next_action,
+                "blockers": blockers,
+                "validation_intent": validation_intent,
                 "handoff_text": handoff_text,
             }
             delegation_returns.append(run_payload)

@@ -179,6 +179,10 @@ def build_memory_prompts(session: SessionState) -> list[str]:
             *(["Selected patterns: " + "; ".join(continuity.get("selected_pattern_summaries", [])[:2])] if isinstance(continuity.get("selected_pattern_summaries"), list) and continuity.get("selected_pattern_summaries") else []),
             *(["Trusted patterns: " + "; ".join(continuity.get("trusted_pattern_summaries", [])[:2])] if isinstance(continuity.get("trusted_pattern_summaries"), list) and continuity.get("trusted_pattern_summaries") else []),
             *(["Preferred artifacts: " + "; ".join(continuity.get("preferred_artifact_refs", [])[:3])] if isinstance(continuity.get("preferred_artifact_refs"), list) and continuity.get("preferred_artifact_refs") else []),
+            *(["Specialist handoff chain: " + " | ".join(continuity.get("specialist_handoff_chain", [])[:3])] if isinstance(continuity.get("specialist_handoff_chain"), list) and continuity.get("specialist_handoff_chain") else []),
+            *(["Specialist next actions: " + " | ".join(continuity.get("specialist_next_actions", [])[:3])] if isinstance(continuity.get("specialist_next_actions"), list) and continuity.get("specialist_next_actions") else []),
+            *(["Verifier blockers: " + "; ".join(continuity.get("verifier_blockers", [])[:2])] if isinstance(continuity.get("verifier_blockers"), list) and continuity.get("verifier_blockers") else []),
+            *(["Verifier validation intent: " + "; ".join(continuity.get("verifier_validation_intent", [])[:2])] if isinstance(continuity.get("verifier_validation_intent"), list) and continuity.get("verifier_validation_intent") else []),
         ]
         prompts.append("Continuity snapshot:\n" + "\n".join(f"- {line}" for line in lines if line))
     if planner_packet:
@@ -637,6 +641,14 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
             snapshot["implementer_scope_source"] = session.routing_signal_summary.implementer_scope_source
         if session.routing_signal_summary.implementer_scope_narrowed:
             snapshot["implementer_scope_narrowed"] = True
+        if session.routing_signal_summary.specialist_handoff_chain:
+            snapshot["specialist_handoff_chain"] = session.routing_signal_summary.specialist_handoff_chain[:6]
+        if session.routing_signal_summary.specialist_next_actions:
+            snapshot["specialist_next_actions"] = session.routing_signal_summary.specialist_next_actions[:6]
+        if session.routing_signal_summary.verifier_blockers:
+            snapshot["verifier_blockers"] = session.routing_signal_summary.verifier_blockers[:4]
+        if session.routing_signal_summary.verifier_validation_intent:
+            snapshot["verifier_validation_intent"] = session.routing_signal_summary.verifier_validation_intent[:4]
     else:
         if isinstance(prior_snapshot.get("implementer_effective_scope"), list):
             snapshot["implementer_effective_scope"] = prior_snapshot["implementer_effective_scope"][:8]
@@ -646,6 +658,14 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
             snapshot["implementer_scope_source"] = str(prior_snapshot["implementer_scope_source"])
         if prior_snapshot.get("implementer_scope_narrowed") is True:
             snapshot["implementer_scope_narrowed"] = True
+        if isinstance(prior_snapshot.get("specialist_handoff_chain"), list):
+            snapshot["specialist_handoff_chain"] = prior_snapshot["specialist_handoff_chain"][:6]
+        if isinstance(prior_snapshot.get("specialist_next_actions"), list):
+            snapshot["specialist_next_actions"] = prior_snapshot["specialist_next_actions"][:6]
+        if isinstance(prior_snapshot.get("verifier_blockers"), list):
+            snapshot["verifier_blockers"] = prior_snapshot["verifier_blockers"][:4]
+        if isinstance(prior_snapshot.get("verifier_validation_intent"), list):
+            snapshot["verifier_validation_intent"] = prior_snapshot["verifier_validation_intent"][:4]
     if session.pattern_signal_summary and session.pattern_signal_summary.trusted_patterns:
         snapshot["trusted_pattern_summaries"] = session.pattern_signal_summary.trusted_patterns[:4]
     elif isinstance(prior_snapshot.get("trusted_pattern_summaries"), list):
@@ -873,6 +893,14 @@ def build_delegation_prompt(session: SessionState) -> str | None:
         prior_return = recent_returns.get(packet.role)
         if prior_return:
             lines.append(f"Last return: {prior_return.summary}")
+            if prior_return.handoff_target:
+                lines.append("Last handoff target: " + prior_return.handoff_target)
+            if prior_return.next_action:
+                lines.append("Last next action: " + prior_return.next_action)
+            if prior_return.validation_intent:
+                lines.append("Last validation intent: " + "; ".join(prior_return.validation_intent[:3]))
+            if prior_return.blockers:
+                lines.append("Last blockers: " + "; ".join(prior_return.blockers[:3]))
             if prior_return.evidence:
                 lines.append("Last evidence: " + "; ".join(prior_return.evidence[:3]))
         prior_artifact = artifact_by_role.get(packet.role)
@@ -882,10 +910,15 @@ def build_delegation_prompt(session: SessionState) -> str | None:
 
 
 def refresh_delegation_packets(session: SessionState) -> None:
+    strategy_validation_paths = (
+        session.strategy_summary.selected_validation_paths[:4]
+        if session.strategy_summary and session.strategy_summary.selected_validation_paths
+        else []
+    )
     packets = default_delegation_packets(
         task=session.goal,
         target_files=session.target_files,
-        validation_commands=session.validation_commands,
+        validation_commands=strategy_validation_paths or session.validation_commands,
     )
     latest_returns = {item.role: item for item in session.delegation_returns[:6]}
     strategy_working_set = (
@@ -1101,6 +1134,36 @@ def _build_delegation_returns(
     verifier_summary = " ".join(verifier_parts) if verifier_parts else "Validation has not run yet."
 
     content_line = _first_nonempty_line(content)
+    investigator_handoff_target = "implementer"
+    implementer_handoff_target = "verifier"
+    verifier_handoff_target = "orchestrator"
+    investigator_next_action = (
+        f"Hand off to implementer and keep the implementation inside {', '.join(files[:3])}."
+        if files
+        else "Hand off to implementer and keep the implementation scope narrow."
+    )
+    implementer_next_action = (
+        f"Hand off to verifier and run targeted validation: {validation_command or session.validation_commands[0]}"
+        if (validation_command or session.validation_commands)
+        else "Hand off to verifier and validate the patch against the delegated checks."
+    )
+    verifier_blockers = [validation_summary] if validation_ok is False and validation_summary else []
+    verifier_validation_intent = _unique_preserve_order(
+        [
+            *(session.validation_commands[:4]),
+            *([validation_command] if validation_command else []),
+        ],
+        limit=4,
+    )
+    verifier_next_action = (
+        "Report the validated fix back to the orchestrator and keep the task ready for completion."
+        if validation_ok is not False
+        else (
+            f"Revise the fix and rerun the verifier path: {verifier_validation_intent[0]}"
+            if verifier_validation_intent
+            else "Revise the fix and rerun the targeted verifier path."
+        )
+    )
     returns = [
         DelegationReturn(
             role="investigator",
@@ -1115,6 +1178,18 @@ def _build_delegation_returns(
             ),
             working_set=files[:8],
             acceptance_checks=session.validation_commands[:4],
+            handoff_target=investigator_handoff_target,
+            next_action=investigator_next_action,
+            validation_intent=session.validation_commands[:4],
+            handoff_text="\n".join(
+                [
+                    f"investigator summary: {investigator_summary}",
+                    f"Next role: {investigator_handoff_target}",
+                    f"Next action: {investigator_next_action}",
+                    *([f"Working set: {', '.join(files[:8])}"] if files else []),
+                    *([f"Validation intent: {'; '.join(session.validation_commands[:4])}"] if session.validation_commands else []),
+                ]
+            ),
         ),
         DelegationReturn(
             role="implementer",
@@ -1130,6 +1205,22 @@ def _build_delegation_returns(
             ),
             working_set=(relevant_changed_files or files)[:8],
             acceptance_checks=session.validation_commands[:4],
+            handoff_target=implementer_handoff_target,
+            next_action=implementer_next_action,
+            validation_intent=verifier_validation_intent,
+            handoff_text="\n".join(
+                [
+                    f"implementer summary: {implementer_summary}",
+                    f"Next role: {implementer_handoff_target}",
+                    f"Next action: {implementer_next_action}",
+                    *(
+                        [f"Working set: {', '.join((relevant_changed_files or files)[:8])}"]
+                        if (relevant_changed_files or files)
+                        else []
+                    ),
+                    *([f"Validation intent: {'; '.join(verifier_validation_intent[:3])}"] if verifier_validation_intent else []),
+                ]
+            ),
         ),
         DelegationReturn(
             role="verifier",
@@ -1143,12 +1234,20 @@ def _build_delegation_returns(
                 limit=4,
             ),
             working_set=files[:8],
-            acceptance_checks=_unique_preserve_order(
+            acceptance_checks=verifier_validation_intent,
+            handoff_target=verifier_handoff_target,
+            next_action=verifier_next_action,
+            blockers=verifier_blockers,
+            validation_intent=verifier_validation_intent,
+            handoff_text="\n".join(
                 [
-                    *(session.validation_commands[:4]),
-                    *([validation_command] if validation_command else []),
-                ],
-                limit=4,
+                    f"verifier summary: {verifier_summary}",
+                    f"Next role: {verifier_handoff_target}",
+                    f"Next action: {verifier_next_action}",
+                    *([f"Working set: {', '.join(files[:8])}"] if files else []),
+                    *([f"Validation intent: {'; '.join(verifier_validation_intent[:3])}"] if verifier_validation_intent else []),
+                    *([f"Blockers: {'; '.join(verifier_blockers[:3])}"] if verifier_blockers else []),
+                ]
             ),
         ),
     ]
@@ -1866,6 +1965,87 @@ def _prefer_narrower_working_set(current: list[str], candidate: list[str]) -> li
     return normalized_current
 
 
+def _latest_delegation_return_for_role(session: SessionState, role: str) -> DelegationReturn | None:
+    for item in session.delegation_returns:
+        if item.role == role:
+            return item
+    return None
+
+
+def _specialist_retry_guidance(
+    session: SessionState,
+) -> tuple[list[str], list[str], list[str], list[str], str]:
+    routing = session.routing_signal_summary
+    continuity = session.continuity_snapshot or {}
+    implementer_return = _latest_delegation_return_for_role(session, "implementer")
+    verifier_return = _latest_delegation_return_for_role(session, "verifier")
+
+    scope: list[str] = []
+    validation_intent: list[str] = []
+    blockers: list[str] = []
+    next_actions: list[str] = []
+    source = ""
+
+    if routing:
+        if routing.implementer_effective_scope:
+            scope = [value for value in routing.implementer_effective_scope if isinstance(value, str) and value.strip()][:8]
+            source = "routing_signal_summary"
+        if routing.verifier_validation_intent:
+            validation_intent = [
+                value for value in routing.verifier_validation_intent if isinstance(value, str) and value.strip()
+            ][:4]
+            source = source or "routing_signal_summary"
+        if routing.verifier_blockers:
+            blockers = [value for value in routing.verifier_blockers if isinstance(value, str) and value.strip()][:4]
+            source = source or "routing_signal_summary"
+        if routing.specialist_next_actions:
+            next_actions = [value for value in routing.specialist_next_actions if isinstance(value, str) and value.strip()][:4]
+            source = source or "routing_signal_summary"
+
+    if not scope and isinstance(continuity.get("implementer_effective_scope"), list):
+        scope = [value for value in continuity.get("implementer_effective_scope", []) if isinstance(value, str) and value.strip()][:8]
+        source = source or "continuity_snapshot"
+    if not validation_intent and isinstance(continuity.get("verifier_validation_intent"), list):
+        validation_intent = [
+            value for value in continuity.get("verifier_validation_intent", []) if isinstance(value, str) and value.strip()
+        ][:4]
+        source = source or "continuity_snapshot"
+    if not blockers and isinstance(continuity.get("verifier_blockers"), list):
+        blockers = [value for value in continuity.get("verifier_blockers", []) if isinstance(value, str) and value.strip()][:4]
+        source = source or "continuity_snapshot"
+    if not next_actions and isinstance(continuity.get("specialist_next_actions"), list):
+        next_actions = [value for value in continuity.get("specialist_next_actions", []) if isinstance(value, str) and value.strip()][:4]
+        source = source or "continuity_snapshot"
+
+    if not scope and implementer_return and implementer_return.working_set:
+        scope = [value for value in implementer_return.working_set if isinstance(value, str) and value.strip()][:8]
+        source = source or "delegation_return"
+    if not validation_intent and verifier_return and verifier_return.validation_intent:
+        validation_intent = [
+            value for value in verifier_return.validation_intent if isinstance(value, str) and value.strip()
+        ][:4]
+        source = source or "delegation_return"
+    if not blockers and verifier_return and verifier_return.blockers:
+        blockers = [value for value in verifier_return.blockers if isinstance(value, str) and value.strip()][:4]
+        source = source or "delegation_return"
+    if not next_actions:
+        delegated_actions: list[str] = []
+        for prior_return in (implementer_return, verifier_return):
+            if prior_return and isinstance(prior_return.next_action, str) and prior_return.next_action.strip():
+                delegated_actions.append(prior_return.next_action.strip())
+        if delegated_actions:
+            next_actions = list(dict.fromkeys(delegated_actions))[:4]
+            source = source or "delegation_return"
+
+    return (
+        list(dict.fromkeys(scope))[:8],
+        list(dict.fromkeys(validation_intent))[:4],
+        list(dict.fromkeys(blockers))[:4],
+        list(dict.fromkeys(next_actions))[:4],
+        source or "none",
+    )
+
+
 def select_collaboration_strategy(
     *,
     prior_sessions: list[SessionState],
@@ -2121,6 +2301,66 @@ def select_collaboration_strategy(
     memory_lines.append(f"Family candidate sessions: {len(candidate_sessions)}")
     memory_lines.append(f"Selected strategy profile: {strategy_profile}")
     memory_lines.append(f"Selected validation style: {validation_style}")
+    if validation_summary.strip() or failure_name.strip():
+        retry_scope: list[str] = []
+        retry_validation_commands: list[str] = []
+        retry_blockers: list[str] = []
+        retry_next_actions: list[str] = []
+        retry_source = ""
+        for prior in candidate_sessions[:4]:
+            (
+                guidance_scope,
+                guidance_validation,
+                guidance_blockers,
+                guidance_next_actions,
+                guidance_source,
+            ) = _specialist_retry_guidance(prior)
+            if not guidance_scope and not guidance_validation and not guidance_blockers and not guidance_next_actions:
+                continue
+            scope_affinity = (
+                max(
+                    _path_affinity(target_files, guidance_scope),
+                    _module_affinity(target_files, guidance_scope),
+                )
+                if guidance_scope
+                else 0.0
+            )
+            if guidance_scope and (
+                family_scope in {"exact_task_signature", "same_task_family", "same_error_family"}
+                or scope_affinity >= 0.45
+            ):
+                retry_scope = _prefer_narrower_working_set(retry_scope, guidance_scope)
+            if guidance_validation:
+                retry_validation_commands.extend(guidance_validation)
+            if guidance_blockers:
+                retry_blockers.extend(guidance_blockers)
+            if guidance_next_actions:
+                retry_next_actions.extend(guidance_next_actions)
+            if guidance_source != "none" and not retry_source:
+                retry_source = guidance_source
+        if retry_scope:
+            for item in retry_scope:
+                if item not in selected_files:
+                    selected_files.append(item)
+            selected_working_set = _prefer_narrower_working_set(selected_working_set, retry_scope)
+            memory_lines.append(
+                "Selected retry scope from specialist handoff"
+                + (f" ({retry_source})" if retry_source else "")
+                + f": {', '.join(retry_scope[:4])}"
+            )
+        if retry_validation_commands:
+            selected_commands = list(dict.fromkeys([*retry_validation_commands, *selected_commands]))
+            memory_lines.append(
+                "Selected verifier retry path"
+                + (f" ({retry_source})" if retry_source else "")
+                + f": {'; '.join(selected_commands[:2])}"
+            )
+        if retry_blockers:
+            memory_lines.append("Retry blockers: " + "; ".join(list(dict.fromkeys(retry_blockers))[:2]))
+        if retry_next_actions:
+            memory_lines.append(
+                "Specialist retry next action: " + list(dict.fromkeys(retry_next_actions))[0][:220]
+            )
     if role_sequence:
         memory_lines.append("Applied role sequence: " + " -> ".join(role_sequence[:3]))
     if not selected_working_set:

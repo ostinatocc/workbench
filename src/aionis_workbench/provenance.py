@@ -210,6 +210,26 @@ def build_provenance_surfaces(
             )
             else "delegation_packet"
         ),
+        specialist_handoff_chain=[
+            f"{item.role}->{item.handoff_target}"
+            for item in session.delegation_returns[:6]
+            if getattr(item, "role", "") and getattr(item, "handoff_target", "")
+        ][:6],
+        specialist_next_actions=[
+            f"{item.role}: {item.next_action}"
+            for item in session.delegation_returns[:6]
+            if getattr(item, "role", "") and getattr(item, "next_action", "")
+        ][:6],
+        verifier_blockers=(
+            return_by_role["verifier"].blockers[:4]
+            if "verifier" in return_by_role
+            else []
+        ),
+        verifier_validation_intent=(
+            return_by_role["verifier"].validation_intent[:4]
+            if "verifier" in return_by_role
+            else []
+        ),
         hit_roles=hit_roles[:6],
         miss_roles=miss_roles[:6],
         routing_reasons=routing_reasons[:6],

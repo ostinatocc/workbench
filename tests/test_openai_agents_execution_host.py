@@ -317,7 +317,14 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
     assert output["delegation_returns"][0]["working_set"] == ["src/demo.py"]
     assert output["delegation_returns"][1]["working_set"] == ["src/demo.py"]
     assert output["delegation_returns"][2]["acceptance_checks"] == ["python3 -m pytest -q"]
+    assert output["delegation_returns"][0]["handoff_target"] == "implementer"
+    assert output["delegation_returns"][1]["handoff_target"] == "verifier"
+    assert output["delegation_returns"][2]["handoff_target"] == "orchestrator"
+    assert output["delegation_returns"][1]["next_action"].startswith("Hand off to verifier")
+    assert output["delegation_returns"][2]["validation_intent"] == ["python3 -m pytest -q"]
     assert output["delegation_returns"][0]["handoff_text"].startswith("investigator summary:")
+    assert "Next role: implementer" in output["delegation_returns"][0]["handoff_text"]
+    assert "Validation intent: python3 -m pytest -q" in output["delegation_returns"][2]["handoff_text"]
     assert output["delegation_returns"][1]["artifact_refs"] == [".aionis-workbench/artifacts/investigator.json"]
     assert "[investigator] Localized the failure in src/demo.py" in output["final_output"]
     assert (tmp_path / "src" / "demo.py").read_text(encoding="utf-8") == "implemented\n"
