@@ -60,7 +60,7 @@ jobs:
       - name: Preflight live credentials
         shell: bash
         run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          .venv/bin/python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           from aionis_workbench.provider_profiles import get_provider_profile, provider_profile_has_required_credentials
           import os
 
@@ -98,13 +98,13 @@ jobs:
           path: |
             tmp/ci/live-openai-agents-e2e.junit.xml
             tmp/ci/live-openai-agents-e2e.log
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Publish live openai-agents summary
         if: always()
         shell: bash
         run: |
-          python ./scripts/summarize-junit.py \
+          .venv/bin/python ./scripts/summarize-junit.py \
             tmp/ci/live-openai-agents-e2e.junit.xml \
             --title "Live OpenAI Agents E2E" \
             --allow-missing >> "$GITHUB_STEP_SUMMARY"
