@@ -918,6 +918,7 @@ class OpenAIAgentsExecutionHost:
         timeout_seconds: float,
         agent_name: str,
     ) -> dict[str, Any]:
+        Agent, Runner, _, _, _ = self._import_agents_runtime()
         openai_client = self._configure_openai_agents_client()
         previous_handler = signal.getsignal(signal.SIGALRM)
         signal.signal(signal.SIGALRM, _timeout_signal_handler)

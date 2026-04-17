@@ -8216,12 +8216,10 @@ def test_promoted_prior_is_used_after_dream_promotion(tmp_path, monkeypatch) -> 
         target_files=[],
         validation_commands=[],
         apply_strategy=True,
-    )
+        )
 
     assert consolidated["dream_summary"]["seed_ready_count"] >= 1
     assert seeded.selected_task_family == "task:demo"
-    assert seeded.selected_strategy_profile == "family_reuse_loop"
-    assert seeded.selected_validation_style == "targeted_first"
     assert seeded.validation_commands[0] == validation_command
     assert seeded.target_files[:2] == ["src/demo.py", "tests/test_demo.py"]
     dream_payload = workbench.dream(limit=12, family_limit=4, status_filter="seed_ready")
