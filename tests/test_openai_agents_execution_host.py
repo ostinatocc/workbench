@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -75,7 +76,7 @@ def test_openai_agents_execution_host_rejects_unsupported_provider(tmp_path, mon
         "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
         lambda: True,
     )
-    config = replace(_base_config(tmp_path), provider="offline", api_key=None, base_url=None)
+    config = replace(_base_config(tmp_path), provider="offline", api_key="test-key", base_url=None)
     host = OpenAIAgentsExecutionHost(config=config, trace=TraceRecorder())
 
     payload = host.describe()
@@ -247,39 +248,78 @@ def test_openai_agents_execution_host_invoke_delivery_task_detects_ready_artifac
         "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
         lambda: True,
     )
-    captured: dict[str, object] = {}
 
-    class _FakeAgent:
-        def __init__(self, *, name, instructions, model, tools) -> None:
-            self.name = name
-            self.instructions = instructions
-            self.model = model
-            self.tools = tools
-            captured["tools"] = tools
-            captured["instructions"] = instructions
+    class _FakeQueue:
+        def __init__(self) -> None:
+            self.payload = None
+            self._used = False
 
-    class _FakeRunner:
-        @staticmethod
-        def run_sync(agent, user_input):
-            captured["user_input"] = user_input
-            tools = {tool.__name__: tool for tool in agent.tools}
-            tools["exec_command"](
-                "python3 -c \"from pathlib import Path; Path('dist').mkdir(exist_ok=True); Path('dist/index.html').write_text('<html>ok</html>', encoding='utf-8')\" # build"
+        def get_nowait(self):
+            if self._used or self.payload is None:
+                raise __import__("queue").Empty
+            self._used = True
+            return self.payload
+
+    class _FakeProcess:
+        def __init__(self, payload, result_queue) -> None:
+            self._payload = payload
+            self._queue = result_queue
+            self.exitcode = 0
+            self._alive = False
+
+        def start(self):
+            self._queue.payload = self._payload
+            self._alive = False
+
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return self._alive
+
+        def terminate(self):
+            self._alive = False
+
+    class _FakeContext:
+        def Queue(self):
+            return _FakeQueue()
+
+        def Process(self, target, args):
+            root_dir = Path(args[3])
+            trace_path = Path(args[7])
+            (root_dir / "dist").mkdir(parents=True, exist_ok=True)
+            (root_dir / "dist" / "index.html").write_text("<html>ok</html>", encoding="utf-8")
+            trace_path.write_text(
+                json.dumps(
+                    {
+                        "step_count": 2,
+                        "steps": [
+                            {
+                                "tool_name": "execute",
+                                "status": "success",
+                                "tool_input": {"command": "npm run build"},
+                            },
+                            {
+                                "tool_name": "write_file",
+                                "status": "success",
+                                "tool_input": {"path": "src/App.tsx"},
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
             )
-            tools["write_file"]("src/App.tsx", "export const implemented = true;\n")
-            return SimpleNamespace(final_output="delivery complete")
-
-    def _fake_function_tool(fn):
-        return fn
+            result_queue = args[-1]
+            payload = {
+                "ok": True,
+                "result": "Build completed and delivery artifact is ready.",
+                "trace_path": str(trace_path),
+            }
+            return _FakeProcess(payload, result_queue)
 
     trace_path = tmp_path / ".aionis-delivery-trace.json"
     host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
-    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
-    monkeypatch.setattr(
-        host,
-        "_import_agents_runtime",
-        lambda: (_FakeAgent, _FakeRunner, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
-    )
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: _FakeContext())
 
     result = host.invoke_delivery_task(
         system_parts=["delivery system"],
@@ -296,7 +336,6 @@ def test_openai_agents_execution_host_invoke_delivery_task_detects_ready_artifac
     trace_payload = trace_path.read_text(encoding="utf-8")
     assert '"tool_name": "execute"' in trace_payload
     assert '"tool_name": "write_file"' in trace_payload
-    assert "Implement the first app shell." == captured["user_input"]
 
 
 def test_openai_agents_execution_host_plan_app_live_uses_json_agent(tmp_path, monkeypatch) -> None:

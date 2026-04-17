@@ -5,7 +5,7 @@ description = "Aionis Workbench: a multi-agent product shell that puts Aionis co
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "deepagents>=0.0.27",
+  "openai-agents",
   "langchain>=0.3.27",
   "langchain-openai>=0.3.30",
   "httpx>=0.28.1",
@@ -15,9 +15,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
-]
-openai_agents = [
-  "openai-agents",
 ]
 
 [project.scripts]

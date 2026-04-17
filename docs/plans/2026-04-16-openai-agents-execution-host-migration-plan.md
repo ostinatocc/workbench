@@ -1,12 +1,12 @@
 # Workbench Execution Host Migration Plan
 
 **Date:** 2026-04-16  
-**Status:** proposed, phase 1 started  
+**Status:** completed host cutover, cleanup in progress  
 **Owner:** Workbench
 
 ## Summary
 
-`Workbench` can move from `deepagents` to [`openai-agents-python`](https://github.com/openai/openai-agents-python), but this should be done as an execution-host migration, not a runtime-kernel rewrite.
+`Workbench` has now moved from `deepagents` to [`openai-agents-python`](https://github.com/openai/openai-agents-python), and the remaining work is cleanup/documentation rather than kernel rewrites.
 
 The right boundary is:
 
@@ -14,18 +14,16 @@ The right boundary is:
 - `Workbench` owns the execution host and controller shell
 - the execution host becomes a replaceable adapter behind one stable contract
 
-This plan starts by creating that adapter boundary while keeping `deepagents` as the default implementation.
+That adapter boundary now exists, the default host has switched to `openai-agents-python`, and the legacy `deepagents` execution path has now been removed from the runtime selection surface.
 
-## Why change now
+## Why this migration happened
 
-Current `Workbench` still depends on `deepagents` for:
+`deepagents` had become the main remaining substrate lock-in in the product shell across:
 
 - live task execution
 - local shell-backed tool use
 - direct/delivery agent loops
 - execution-host naming and health metadata
-
-That dependency is now the main remaining substrate lock-in in the product shell.
 
 `openai-agents-python` is now a credible replacement candidate because the official surface includes:
 
@@ -42,20 +40,26 @@ That makes it realistic to replace the execution host without changing `AionisCo
 
 `Workbench` should migrate to a host-adapter architecture with two phases of compatibility:
 
-1. `deepagents` remains the default host behind a generic `ExecutionHost` contract
-2. `openai-agents-python` lands as a second host implementation
-3. after parity, `deepagents` becomes optional fallback
-4. after enough live and deterministic confidence, `openai-agents-python` becomes the default
+1. establish a generic `ExecutionHost` contract
+2. land `openai-agents-python` as a second host implementation
+3. switch the default host to `openai-agents-python` once deterministic and live confidence are in place
+4. remove the legacy `deepagents` execution path once delivery/runtime parity is preserved
+
+That cutover is now complete:
+
+- `openai-agents-python` is the default and only runtime-selected host
+- `deepagents` has been removed from the dependency surface
+- deterministic and live evidence exist for the migrated host
 
 ## Non-goals
 
-This migration should **not**:
+This migration should **not** have:
 
 - move execution-host logic into `AionisCore`
 - rewrite continuity, replay, handoff, or review-pack flows
 - change `Workbench` controller semantics
 - change shell/status/controller payload contracts as part of phase 1
-- remove `deepagents` before parity exists
+- removed `deepagents` before parity exists
 
 ## Current dependency surface
 
@@ -93,9 +97,7 @@ That is the contract we need to preserve during migration.
 ```mermaid
 flowchart LR
     WB["Workbench Runtime"] --> FAC["Execution Host Factory"]
-    FAC --> D["Deepagents Host Adapter"]
     FAC --> O["OpenAI Agents Host Adapter"]
-    D --> C["ExecutionHost Contract"]
     O --> C
     WB --> RK["AionisCore Runtime Kernel"]
 ```
@@ -129,13 +131,13 @@ Deliverables:
 - add host metadata defaults in one place
 - instantiate hosts through a factory
 - make `runtime.py`, `orchestrator.py`, and `delivery_executor.py` depend on the protocol, not `DeepagentsExecutionHost`
-- add `WORKBENCH_EXECUTION_HOST` config with `deepagents` as default
+- add `WORKBENCH_EXECUTION_HOST` config with a replaceable host default
 
 Exit criteria:
 
 - no product behavior changes
 - deterministic tests stay green
-- `deepagents` remains the only active implementation
+- runtime/orchestrator/delivery no longer depend on a concrete deepagents type
 
 ### Phase 2: add `OpenAIAgentsExecutionHost`
 
@@ -175,19 +177,19 @@ Exit criteria:
 - app/doc flows no longer assume `deepagents`
 - live e2e has passing coverage on the new host
 
-### Phase 4: make `deepagents` optional
+### Phase 4: make `openai_agents` the only host
 
 Deliverables:
 
-- move `deepagents` out of the default dependency list
-- make it an extra or compatibility extra
-- default factory route selects `openai_agents`
-- keep `deepagents` as fallback for a bounded compatibility window
+- remove `deepagents` from the dependency and runtime selection surface
+- port delivery retry/timeout behavior to the `openai_agents` host
+- remove the legacy execution-host factory branch
+- keep the shared delivery timeout and trace helpers substrate-agnostic
 
 Exit criteria:
 
 - install path works without `deepagents`
-- deterministic CI and live gate pass on the default host
+- deterministic CI and live gate pass on the only supported host
 
 ## Risks
 
@@ -238,8 +240,8 @@ Phase 2 and Phase 3 should add:
 1. add execution-host contract module
 2. add execution-host factory
 3. thread the contract through runtime/orchestrator/delivery paths
-4. add config selector with `deepagents` default
-5. keep all behavior and docs honest: current default remains `deepagents`
+4. add config selector with a replaceable default
+5. keep behavior and docs honest about which host is currently primary
 
 ## Current status
 
@@ -263,6 +265,11 @@ Started:
 - `tests_real_live_e2e/test_live_app_escalate.py` passed with `WORKBENCH_EXECUTION_HOST=openai_agents`
 - `tests_real_live_e2e/test_live_app_replan_generate_qa.py` passed with `WORKBENCH_EXECUTION_HOST=openai_agents`
 - `tests_real_live_e2e/test_live_app_replan_generate_qa_advance.py` passed with `WORKBENCH_EXECUTION_HOST=openai_agents`
+- phase 4 default switch started:
+  - `openai-agents-python` moved into the default dependency set
+  - `deepagents` removed from the dependency list and runtime selector
+  - `WORKBENCH_EXECUTION_HOST` now defaults to `openai_agents`
+  - delivery retry/timeout behavior is being ported onto the `openai_agents` host so the legacy execution-host implementation can be deleted
 - a dedicated manual workflow now exists at `.github/workflows/workbench-live-openai-agents.yml`
 - the narrow experimental live slice is codified in `scripts/run-real-live-openai-agents-e2e.sh`
 

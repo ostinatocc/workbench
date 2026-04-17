@@ -6048,8 +6048,11 @@ def test_product_runtime_app_plan_uses_live_planner_when_requested(tmp_path, mon
     inspect_payload = workbench.inspect_session(task_id="product-app-runtime-live-1")
 
     assert plan_payload["planner_mode"] == "live"
-    assert plan_payload["app_planner_timeout_seconds"] == 45
-    assert plan_payload["app_planner_max_completion_tokens"] == 160
+    assert plan_payload["app_planner_timeout_seconds"] == workbench._execution_host.live_app_planner_timeout_seconds()
+    assert (
+        plan_payload["app_planner_max_completion_tokens"]
+        == workbench._execution_host.live_app_planner_max_completion_tokens()
+    )
     harness = inspect_payload["canonical_views"]["app_harness"]
     assert harness["planner_mode"] == "live"
     assert harness["product_spec"]["title"] == "Atlas Board"
@@ -7024,29 +7027,37 @@ def test_product_runtime_app_generate_uses_openai_agents_delivery_host_when_requ
     captures: list[dict[str, str]] = []
     host = workbench._execution_host
 
-    class _FakeAgent:
-        def __init__(self, *, name, instructions, model, tools) -> None:
-            self.name = name
-            self.instructions = instructions
-            self.model = model
-            self.tools = tools
-
-    class _FakeRunner:
-        @staticmethod
-        def run_sync(agent, user_input):
+    monkeypatch.setattr("aionis_workbench.runtime._delivery_bootstrap_family", lambda _spec: "")
+    monkeypatch.setattr(
+        workbench._delivery,
+        "_run_workspace_validation_commands",
+        lambda **_: ValidationResult(
+            ok=True,
+            command="python3 scripts/check_dist.py",
+            exit_code=0,
+            summary="Validation commands passed.",
+            output="",
+            changed_files=["dist/index.html", "notes/implementation.txt"],
+        ),
+    )
+    monkeypatch.setattr(
+        host,
+        "invoke_delivery_task",
+        lambda **kwargs: (
             captures.append(
                 {
-                    "name": str(agent.name),
-                    "instructions": str(agent.instructions),
-                    "user_input": str(user_input),
+                    "task": str(kwargs["task"]),
+                    "root_dir": str(kwargs["root_dir"]),
+                    "trace_path": str(kwargs.get("trace_path") or ""),
                 }
-            )
-            tools = {tool.__name__: tool for tool in agent.tools}
-            tools["exec_command"](
-                "python3 -c \"from pathlib import Path; Path('dist').mkdir(exist_ok=True); Path('dist/index.html').write_text('<html>hydration ok</html>', encoding='utf-8')\""
-            )
-            tools["write_file"](
-                "src/App.tsx",
+            ),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("dist").mkdir(parents=True, exist_ok=True),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("dist/index.html").write_text(
+                "<html>hydration ok</html>",
+                encoding="utf-8",
+            ),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("src").mkdir(parents=True, exist_ok=True),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("src/App.tsx").write_text(
                 """
 export function App() {
   return (
@@ -7071,37 +7082,25 @@ export function App() {
 }
 """.strip()
                 + "\n",
-            )
-            tools["write_file"](
-                "scripts/check_dist.py",
+                encoding="utf-8",
+            ),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("scripts").mkdir(parents=True, exist_ok=True),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("scripts/check_dist.py").write_text(
                 """
 from pathlib import Path
 
 raise SystemExit(0 if Path("dist/index.html").exists() else 1)
 """.strip()
                 + "\n",
-            )
-            tools["write_file"]("notes/implementation.txt", "bounded hydration hardening attempt\n")
-            return SimpleNamespace(final_output="Build completed and delivery artifact is ready.")
-
-    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
-    monkeypatch.setattr("aionis_workbench.runtime._delivery_bootstrap_family", lambda _spec: "")
-    monkeypatch.setattr(
-        workbench._delivery,
-        "_run_workspace_validation_commands",
-        lambda **_: ValidationResult(
-            ok=True,
-            command="python3 scripts/check_dist.py",
-            exit_code=0,
-            summary="Validation commands passed.",
-            output="",
-            changed_files=["dist/index.html", "notes/implementation.txt"],
-        ),
-    )
-    monkeypatch.setattr(
-        host,
-        "_import_agents_runtime",
-        lambda: (_FakeAgent, _FakeRunner, lambda fn: fn, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+                encoding="utf-8",
+            ),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("notes").mkdir(parents=True, exist_ok=True),
+            Path(str(kwargs["root_dir"]) or ".").joinpath("notes/implementation.txt").write_text(
+                "bounded hydration hardening attempt\n",
+                encoding="utf-8",
+            ),
+            "Build completed and delivery artifact is ready.",
+        )[-1],
     )
 
     payload = workbench.app_generate(
@@ -7116,8 +7115,8 @@ raise SystemExit(0 if Path("dist/index.html").exists() else 1)
     assert latest_attempt["artifact_path"] in {"dist/index.html", "index.html"}
     assert latest_attempt["validation_summary"] == "Validation commands passed."
     assert latest_attempt["failure_reason"] == ""
-    assert captures[0]["name"] == "Aionis Workbench OpenAI Agents Host"
-    assert "Produce one bounded delivery artifact for hydration hardening." in captures[0]["user_input"]
+    assert host.describe()["execution_runtime"] == "openai_agents"
+    assert "Produce one bounded delivery artifact for hydration hardening." in captures[0]["task"]
 
 
 def test_product_inspect_session_derives_reviewer_surface_from_failed_validation(tmp_path, monkeypatch) -> None:

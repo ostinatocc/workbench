@@ -76,12 +76,12 @@ def test_statusline_renders_host_summary() -> None:
             "contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             }
         },
     )
     text = render_statusline(payload)
-    assert "hosts:aionis_cli/workbench_engine/deepagents_local_shell" in text
+    assert "hosts:aionis_cli/workbench_engine/openai_agents_local_shell" in text
 
 
 def test_statusline_renders_controller_actions() -> None:

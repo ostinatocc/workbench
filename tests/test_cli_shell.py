@@ -1034,7 +1034,7 @@ def test_main_prints_ready_surface(monkeypatch, capsys) -> None:
                 "contract": {
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
-                    "execution_host": {"name": "deepagents_local_shell"},
+                    "execution_host": {"name": "openai_agents_local_shell"},
                 }
             }
 
@@ -2451,7 +2451,7 @@ def test_main_returns_host_error_payload_for_run_failure(monkeypatch, capsys) ->
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2488,7 +2488,7 @@ def test_main_returns_host_error_payload_for_resume_failure(monkeypatch, capsys)
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2533,7 +2533,7 @@ def test_main_returns_blocked_live_preflight_payload_for_run(monkeypatch, capsys
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2587,7 +2587,7 @@ def test_main_prints_run_preflight_one_line(monkeypatch, capsys) -> None:
             return {
                 "contract": {
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2632,7 +2632,7 @@ def test_main_returns_ready_live_preflight_payload_for_resume(monkeypatch, capsy
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -2677,7 +2677,7 @@ def test_main_prints_resume_preflight_one_line(monkeypatch, capsys) -> None:
             return {
                 "contract": {
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -2729,7 +2729,7 @@ def test_main_returns_runtime_degraded_recovery_for_run(monkeypatch, capsys) -> 
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -3377,9 +3377,9 @@ def test_render_result_payload_summarizes_hosts() -> None:
                     ],
                 },
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "supports_live_tasks": True,
-                    "execution_runtime": "deepagents",
+                    "execution_runtime": "openai_agents",
                     "backend": "LocalShellBackend",
                     "model_provider": "openrouter",
                     "mode": "live_enabled",
@@ -3399,7 +3399,7 @@ def test_render_result_payload_summarizes_hosts() -> None:
             },
         }
     )
-    assert lines[0] == "hosts: shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell runtime=aionis_runtime_host"
+    assert lines[0] == "hosts: shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell runtime=aionis_runtime_host"
     assert "entrypoint=aionis --repo-root /tmp/repo" in lines[1]
     assert "workflow=/plan, /work, /review, /next, /fix" in lines[2]
     assert lines[4] == "  health=shell:available learning:available execution:available runtime:available"
@@ -3424,7 +3424,7 @@ def test_render_result_payload_summarizes_host_error() -> None:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -3471,7 +3471,7 @@ def test_render_result_payload_summarizes_live_preflight() -> None:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -3513,7 +3513,7 @@ def test_render_result_payload_distinguishes_runtime_degraded_recovery() -> None
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "live_enabled",
                     "health_status": "available",
                     "health_reason": "",
@@ -3574,7 +3574,7 @@ def test_render_result_payload_summarizes_doctor() -> None:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -3629,7 +3629,7 @@ def test_render_result_payload_summarizes_ready() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -3659,7 +3659,7 @@ def test_render_result_payload_summarizes_doctor_summary() -> None:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -3715,7 +3715,7 @@ def test_render_result_payload_summarizes_doctor_check() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -3755,7 +3755,7 @@ def test_render_result_payload_summarizes_setup() -> None:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -3791,7 +3791,7 @@ def test_render_result_payload_summarizes_setup_summary() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -3818,7 +3818,7 @@ def test_render_result_payload_summarizes_setup_check() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4013,7 +4013,7 @@ def test_render_result_payload_bootstrap_shows_family_priors() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4023,7 +4023,7 @@ def test_render_result_payload_bootstrap_shows_family_priors() -> None:
     assert lines[4] == "  validate_first=Run PYTHONPATH=src python3 -m pytest -q before expanding the working set."
     assert "recent prior: task:termui via interactive_reuse_loop" in lines[5]
     assert "  priors=task:termui:interactive_reuse_loop" in lines
-    assert "  hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell" in lines
+    assert "  hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell" in lines
     assert "  workflow=/init -> /doctor -> /run -> /work -> /next -> /fix -> /validate" in lines
 
 
@@ -4393,7 +4393,7 @@ def test_render_result_payload_plan_summary() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4407,7 +4407,7 @@ def test_render_result_payload_plan_summary() -> None:
     assert lines[7] == "  prior_strategy=interactive_reuse_loop prior_validation=targeted_first"
     assert lines[8] == "  prior_stats=confidence=0.91 samples=4 recent_success=3"
     assert "prior_seed=ready gate=ready" in lines[9]
-    assert "hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell" in lines[10]
+    assert "hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell" in lines[10]
     assert "reviewer=strict_review outputs=patch|tests" in lines[11]
     assert "acceptance=pytest tests/test_termui.py -q" in lines[11]
     assert any("review_packs=continuity:strict_review/read" in line for line in lines)
@@ -4455,14 +4455,14 @@ def test_render_result_payload_plan_shows_blocked_prior_recommendation() -> None
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
     assert "reuse signals exist but the prior is still blocked" in lines[4]
     assert "seed_blocked family=stable_family" in lines[5]
     assert lines[9] == "  prior_seed=blocked gate=confidence reason=confidence 0.58 is below the 0.70 seed threshold"
-    assert lines[10] == "  hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell"
+    assert lines[10] == "  hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell"
     assert lines[11] == "  workflow=/plan -> /review -> /fix -> /validate"
     assert lines[12] == "  recommendation=add one more high-trust success path, ideally via manual ingest or workflow closure"
     assert lines[13] == "  recommended=/review click-3043-ingest-1"
@@ -4507,7 +4507,7 @@ def test_render_result_payload_plan_shows_host_health_hint_when_degraded() -> No
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -4567,7 +4567,7 @@ def test_render_result_payload_plan_uses_family_prior_validation_fallback() -> N
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4606,7 +4606,7 @@ def test_render_result_payload_plan_uses_structured_controller_action_bar() -> N
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4675,7 +4675,7 @@ def test_render_result_payload_review_shows_auto_learning() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4685,7 +4685,7 @@ def test_render_result_payload_review_shows_auto_learning() -> None:
     assert lines[6] == "  prior_strategy=interactive_reuse_loop prior_validation=targeted_first"
     assert lines[7] == "  prior_stats=confidence=0.91 samples=4 recent_success=3"
     assert "prior_seed=ready gate=ready" in lines[8]
-    assert "hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell" in lines[9]
+    assert "hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell" in lines[9]
     assert "reviewer=strict_review outputs=patch|tests" in lines[10]
     assert any("review_packs=continuity:strict_review/read" in line for line in lines)
     assert any("learning=auto_absorbed" in line and "source=validate" in line and "observed=3" in line for line in lines)
@@ -4728,7 +4728,7 @@ def test_render_result_payload_review_uses_structured_controller_action_bar() ->
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4791,7 +4791,7 @@ def test_render_result_payload_work_view_is_multiline() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4804,7 +4804,7 @@ def test_render_result_payload_work_view_is_multiline() -> None:
     assert lines[6] == "  prior_strategy=interactive_reuse_loop prior_validation=targeted_first"
     assert lines[7] == "  prior_stats=confidence=0.91 samples=4 recent_success=3"
     assert "prior_seed=ready gate=ready" in lines[8]
-    assert "hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell" in lines[9]
+    assert "hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell" in lines[9]
     assert "reviewer=strict_review outputs=patch|tests" in lines[10]
     assert any("review_packs=continuity:strict_review/read" in line for line in lines)
     assert any("instrumentation=strong_match" in line for line in lines)
@@ -4851,7 +4851,7 @@ def test_render_result_payload_work_shows_host_health_hint_when_degraded() -> No
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -4904,7 +4904,7 @@ def test_render_result_payload_work_uses_structured_controller_action_bar() -> N
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4952,7 +4952,7 @@ def test_render_result_payload_review_view_is_multiline() -> None:
             "host_contract": {
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
-                "execution_host": {"name": "deepagents_local_shell"},
+                "execution_host": {"name": "openai_agents_local_shell"},
             },
         }
     )
@@ -4965,7 +4965,7 @@ def test_render_result_payload_review_view_is_multiline() -> None:
     assert lines[6] == "  prior_strategy=interactive_reuse_loop prior_validation=targeted_first"
     assert lines[7] == "  prior_stats=confidence=0.91 samples=4 recent_success=3"
     assert "prior_seed=ready gate=ready" in lines[8]
-    assert "hosts=shell=aionis_cli learning=workbench_engine execution=deepagents_local_shell" in lines[9]
+    assert "hosts=shell=aionis_cli learning=workbench_engine execution=openai_agents_local_shell" in lines[9]
     assert "instrumentation=strong_match" in lines[10]
     assert "learning=manual_only" in lines[11]
     assert "top_peers=click-2869-ingest-1, click-3242-ingest-1" in lines[12]
@@ -5011,7 +5011,7 @@ def test_render_result_payload_review_shows_host_health_hint_when_degraded() -> 
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -5288,7 +5288,7 @@ def test_run_shell_renders_structured_run_error() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -6139,7 +6139,7 @@ def test_run_shell_init_bootstrap() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",

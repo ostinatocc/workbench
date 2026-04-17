@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-DEFAULT_EXECUTION_HOST_NAME = "deepagents_local_shell"
-DEFAULT_EXECUTION_RUNTIME = "deepagents"
-DEFAULT_EXECUTION_BACKEND = "LocalShellBackend"
-DEFAULT_EXECUTION_HOST_RUNTIME = "deepagents"
+DEFAULT_EXECUTION_HOST_NAME = "openai_agents_local_shell"
+DEFAULT_EXECUTION_RUNTIME = "openai_agents"
+DEFAULT_EXECUTION_BACKEND = "Agent+Runner"
+DEFAULT_EXECUTION_HOST_RUNTIME = "openai_agents"
 
 
 @runtime_checkable

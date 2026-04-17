@@ -195,7 +195,7 @@ def load_workbench_config(repo_root_override: str | None = None) -> WorkbenchCon
         base_url = None
 
     return WorkbenchConfig(
-        execution_host_runtime=os.environ.get("WORKBENCH_EXECUTION_HOST", "deepagents").strip().lower(),
+        execution_host_runtime=os.environ.get("WORKBENCH_EXECUTION_HOST", "openai_agents").strip().lower(),
         model=model,
         system_prompt=os.environ.get("WORKBENCH_SYSTEM_PROMPT"),
         provider=provider,

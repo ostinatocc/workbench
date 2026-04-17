@@ -12,7 +12,7 @@ from aionis_workbench.execution_host import _delivery_retry_backoff_seconds
 from aionis_workbench.execution_host import _reset_delivery_trace
 from aionis_workbench.execution_host import _should_retry_transient_delivery_error
 from aionis_workbench.execution_host import _trace_shows_successful_build
-from aionis_workbench.execution_host import DeepagentsExecutionHost
+from aionis_workbench.openai_agents_execution_host import OpenAIAgentsExecutionHost
 from aionis_workbench.recovery_service import ValidationResult
 from aionis_workbench.session import SessionState
 from aionis_workbench.tracing import (
@@ -541,15 +541,7 @@ def test_delivery_executor_upgrades_build_only_web_validation_to_install_and_bui
     )
 
     assert recorded == ["npm install --no-fund --no-audit", "npm run build"]
-    assert result.validation_command == (
-        'python3 -c "from pathlib import Path; p=Path(\'src/App.svelte\'); '
-        "s=p.read_text(encoding='utf-8') if p.exists() else ''; "
-        "markers=('<main', '<section', '<header', '<nav', '<aside', '<footer', '<article', '<div'); "
-        "text=s.lower(); hits=sum(1 for marker in markers if marker in text); "
-        "label='svelte app surface'; ok=bool(s.strip()) and len(s) >= 250 and hits >= 2; "
-        "print(f'{label} ok' if ok else f'{label} too sparse'); "
-        'raise SystemExit(0 if ok else 1)"'
-    )
+    assert result.validation_command == "npm run build"
 
 
 def test_delivery_executor_validates_bootstrapped_node_api_after_timeout(tmp_path) -> None:
@@ -577,6 +569,16 @@ def test_delivery_executor_validates_bootstrapped_node_api_after_timeout(tmp_pat
             output="",
             changed_files=[],
         ),
+    )
+    executor._run_workspace_validation_commands = (  # type: ignore[attr-defined]
+        lambda *, workspace_root, commands: ValidationResult(
+            ok=True,
+            command=commands[-1] if commands else None,
+            exit_code=0,
+            summary="Validation commands passed.",
+            output="",
+            changed_files=[],
+        )
     )
     session = SessionState(
         task_id="delivery-node-timeout-1",
@@ -640,6 +642,9 @@ def test_delivery_executor_refreshes_web_artifact_after_timeout_validation(tmp_p
         workspace=workspace,
         run_validation_commands_fn=_validate_and_build,
     )
+    executor._run_workspace_validation_commands = (  # type: ignore[attr-defined]
+        lambda *, workspace_root, commands: _validate_and_build(commands)
+    )
     session = SessionState(
         task_id="delivery-web-timeout-1",
         goal="Keep a valid web artifact even after a timeout.",
@@ -662,15 +667,7 @@ def test_delivery_executor_refreshes_web_artifact_after_timeout_validation(tmp_p
     assert result.artifact_kind == "vite_dist"
     assert result.artifact_paths[0] == "dist/index.html"
     assert result.preview_command == f"python3 -m http.server 4173 --directory {workspace_root / 'dist'}"
-    assert result.validation_command == (
-        'python3 -c "from pathlib import Path; p=Path(\'src/App.svelte\'); '
-        "s=p.read_text(encoding='utf-8') if p.exists() else ''; "
-        "markers=('<main', '<section', '<header', '<nav', '<aside', '<footer', '<article', '<div'); "
-        "text=s.lower(); hits=sum(1 for marker in markers if marker in text); "
-        "label='svelte app surface'; ok=bool(s.strip()) and len(s) >= 250 and hits >= 2; "
-        "print(f'{label} ok' if ok else f'{label} too sparse'); "
-        'raise SystemExit(0 if ok else 1)"'
-    )
+    assert result.validation_command == "npm run build"
     assert result.validation_summary == "Validation commands passed."
     assert result.validation_ok is True
     assert result.failure_reason == ""
@@ -1055,14 +1052,14 @@ def test_invoke_delivery_task_retries_once_after_transient_429(tmp_path, monkeyp
     fake_context = _FakeContext(payloads)
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr("aionis_workbench.execution_host.multiprocessing.get_context", lambda _mode: fake_context)
-    monkeypatch.setattr("aionis_workbench.execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: fake_context)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
     from aionis_workbench.config import WorkbenchConfig
 
-    host = DeepagentsExecutionHost(
+    host = OpenAIAgentsExecutionHost(
         config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
+            execution_host_runtime="openai_agents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1143,13 +1140,13 @@ def test_invoke_delivery_task_caps_per_model_timeout_separately_from_delivery_ti
             }
             return _FakeProcess(payload, result_queue)
 
-    monkeypatch.setattr("aionis_workbench.execution_host.multiprocessing.get_context", lambda _mode: _FakeContext())
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: _FakeContext())
 
     from aionis_workbench.config import WorkbenchConfig
 
-    host = DeepagentsExecutionHost(
+    host = OpenAIAgentsExecutionHost(
         config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
+            execution_host_runtime="openai_agents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1237,14 +1234,14 @@ def test_invoke_delivery_task_reports_retry_exhaustion_for_transient_overload(tm
     fake_context = _FakeContext(payloads)
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr("aionis_workbench.execution_host.multiprocessing.get_context", lambda _mode: fake_context)
-    monkeypatch.setattr("aionis_workbench.execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: fake_context)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
     from aionis_workbench.config import WorkbenchConfig
 
-    host = DeepagentsExecutionHost(
+    host = OpenAIAgentsExecutionHost(
         config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
+            execution_host_runtime="openai_agents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1286,50 +1283,6 @@ def test_invoke_delivery_task_reports_retry_exhaustion_for_transient_overload(tm
     assert len(payload["delivery_retry_events"]) == 3
 
 
-def test_build_delivery_agent_disables_model_internal_retries(tmp_path) -> None:
-    from aionis_workbench.config import WorkbenchConfig
-
-    host = DeepagentsExecutionHost(
-        config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
-            model="glm-5.1",
-            system_prompt=None,
-            provider="openai",
-            api_key="test-key",
-            base_url="https://example.invalid",
-            max_completion_tokens=8192,
-            model_timeout_seconds=45.0,
-            model_max_retries=1,
-            repo_root=str(tmp_path),
-            project_identity="local/test",
-            project_scope="project:local/test",
-            auto_consolidation_enabled=False,
-            auto_consolidation_min_hours=24.0,
-            auto_consolidation_min_new_sessions=5,
-            auto_consolidation_scan_throttle_minutes=10.0,
-        ),
-        trace=TraceRecorder(),
-    )
-    captured: dict[str, object] = {}
-
-    def _fake_build_model(**kwargs):
-        captured.update(kwargs)
-        return object()
-
-    host._build_model = _fake_build_model  # type: ignore[method-assign]
-
-    host.build_delivery_agent(
-        system_parts=["Do real file edits."],
-        memory_sources=["src/App.tsx"],
-        root_dir=str(tmp_path),
-        model_timeout_seconds_override=90.0,
-    )
-
-    assert captured["timeout_pressure"] is False
-    assert captured["timeout_seconds_override"] == 90.0
-    assert captured["max_retries_override"] == 0
-
-
 def test_invoke_delivery_task_retries_and_fails_fast_when_no_first_trace_step_arrives(tmp_path, monkeypatch) -> None:
     class _FakeQueue:
         def get_nowait(self):
@@ -1363,10 +1316,10 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_no_first_trace_step_ar
     fake_context = _FakeContext()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr("aionis_workbench.execution_host.multiprocessing.get_context", lambda _mode: fake_context)
-    monkeypatch.setattr("aionis_workbench.execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: fake_context)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
     monkeypatch.setattr(
-        "aionis_workbench.execution_host._delivery_first_response_timeout_seconds",
+        "aionis_workbench.openai_agents_execution_host._delivery_first_response_timeout_seconds",
         lambda **_kwargs: 1.0,
     )
 
@@ -1377,13 +1330,13 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_no_first_trace_step_ar
             4.0, 4.0, 5.1, 5.1,  # attempt 3
         ]
     )
-    monkeypatch.setattr("aionis_workbench.execution_host.time.monotonic", lambda: next(monotonic_values, 999.0))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.monotonic", lambda: next(monotonic_values, 999.0))
 
     from aionis_workbench.config import WorkbenchConfig
 
-    host = DeepagentsExecutionHost(
+    host = OpenAIAgentsExecutionHost(
         config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
+            execution_host_runtime="openai_agents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",
@@ -1459,14 +1412,14 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_trace_progress_stalls(
     fake_context = _FakeContext()
     sleep_calls: list[float] = []
 
-    monkeypatch.setattr("aionis_workbench.execution_host.multiprocessing.get_context", lambda _mode: fake_context)
-    monkeypatch.setattr("aionis_workbench.execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.multiprocessing.get_context", lambda _mode: fake_context)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.sleep", lambda seconds: sleep_calls.append(seconds))
     monkeypatch.setattr(
-        "aionis_workbench.execution_host._delivery_progress_timeout_seconds",
+        "aionis_workbench.openai_agents_execution_host._delivery_progress_timeout_seconds",
         lambda **_kwargs: 1.0,
     )
-    monkeypatch.setattr("aionis_workbench.execution_host._trace_has_steps", lambda _trace_path: True)
-    monkeypatch.setattr("aionis_workbench.execution_host._trace_step_count", lambda _trace_path: 5)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host._trace_has_steps", lambda _trace_path: True)
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host._trace_step_count", lambda _trace_path: 5)
 
     monotonic_values = iter(
         [
@@ -1475,13 +1428,13 @@ def test_invoke_delivery_task_retries_and_fails_fast_when_trace_progress_stalls(
             4.0, 4.0, 4.2, 4.2, 5.3,  # attempt 3
         ]
     )
-    monkeypatch.setattr("aionis_workbench.execution_host.time.monotonic", lambda: next(monotonic_values, 999.0))
+    monkeypatch.setattr("aionis_workbench.openai_agents_execution_host.time.monotonic", lambda: next(monotonic_values, 999.0))
 
     from aionis_workbench.config import WorkbenchConfig
 
-    host = DeepagentsExecutionHost(
+    host = OpenAIAgentsExecutionHost(
         config=WorkbenchConfig(
-            execution_host_runtime="deepagents",
+            execution_host_runtime="openai_agents",
             model="glm-5.1",
             system_prompt=None,
             provider="openai",

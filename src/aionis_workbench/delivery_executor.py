@@ -53,6 +53,35 @@ class DeliveryExecutor:
             workspace_root=workspace_root,
         )
 
+    def _resolved_workspace_validation_commands(
+        self,
+        *,
+        workspace_root: Path,
+        commands: list[str],
+    ) -> list[str]:
+        family_id = infer_delivery_family_from_workspace(workspace_root)
+        normalized = [command.strip() for command in commands if isinstance(command, str) and command.strip()]
+        runnable = [
+            command
+            for command in normalized
+            if _validation_command_looks_runnable(command, str(workspace_root))
+        ]
+        default_commands = delivery_family_workspace_validation_commands(
+            family_id,
+            workspace_root=workspace_root,
+        )
+        if (
+            runnable == ["npm run build"]
+            and family_id in {"react_vite_web", "vue_vite_web", "svelte_vite_web", "nextjs_web"}
+            and default_commands[:2] == ["npm install --no-fund --no-audit", "npm run build"]
+        ):
+            return default_commands[:2]
+        commands_to_run = runnable or default_commands
+        if runnable and default_commands:
+            if len(runnable) < len(default_commands) and all(command in default_commands for command in runnable):
+                commands_to_run = default_commands
+        return commands_to_run
+
     def _trace_path(self, *, workspace_root: Path) -> Path:
         return workspace_root / ".aionis-delivery-trace.json"
 
@@ -85,17 +114,10 @@ class DeliveryExecutor:
         return "", None
 
     def _run_workspace_validation_commands(self, *, workspace_root: Path, commands: list[str]) -> ValidationResult:
-        normalized = [command.strip() for command in commands if isinstance(command, str) and command.strip()]
-        runnable = [
-            command
-            for command in normalized
-            if _validation_command_looks_runnable(command, str(workspace_root))
-        ]
-        default_commands = self._default_workspace_validation_commands(workspace_root=workspace_root)
-        commands_to_run = runnable or default_commands
-        if runnable and default_commands:
-            if len(runnable) < len(default_commands) and all(command in default_commands for command in runnable):
-                commands_to_run = default_commands
+        commands_to_run = self._resolved_workspace_validation_commands(
+            workspace_root=workspace_root,
+            commands=commands,
+        )
         if not commands_to_run:
             return ValidationResult(
                 ok=True,
@@ -167,9 +189,13 @@ class DeliveryExecutor:
             artifact_paths=artifact_paths,
             workspace_root=workspace_root,
         )
-        validation = self._run_workspace_validation_commands(
+        resolved_validation_commands = self._resolved_workspace_validation_commands(
             workspace_root=workspace_root,
             commands=validation_commands,
+        )
+        validation = self._run_workspace_validation_commands(
+            workspace_root=workspace_root,
+            commands=resolved_validation_commands,
         ) if install_and_build or validation_commands else ValidationResult(
             ok=True,
             command=None,
@@ -205,6 +231,7 @@ class DeliveryExecutor:
         changed_target_hints: list[str],
     ) -> DeliveryExecutionResult:
         workspace_root = self._workspace.ensure_empty_task_workspace(task_id=session.task_id)
+        workspace_bootstrapped = False
         web_bootstrap_targets = {
             "package.json",
             "vite.config.ts",
@@ -264,36 +291,43 @@ class DeliveryExecutor:
                     title=self._task_title(session),
                     family_id=delivery_family,
                 )
+                workspace_bootstrapped = True
         elif not (workspace_root / "package.json").exists() and web_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_web_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         elif not (workspace_root / "src" / "App.vue").exists() and vue_web_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_vue_web_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         elif not (workspace_root / "src" / "App.svelte").exists() and svelte_web_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_svelte_web_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         elif not (workspace_root / "app" / "page.tsx").exists() and nextjs_web_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_nextjs_web_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         elif not (workspace_root / "main.py").exists() and python_api_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_python_api_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         elif not (workspace_root / "main.js").exists() and node_api_bootstrap_targets.intersection(memory_sources):
             workspace_root = self._workspace.bootstrap_empty_node_api_workspace(
                 task_id=session.task_id,
                 title=self._task_title(session),
             )
+            workspace_bootstrapped = True
         trace_path = self._trace_path(workspace_root=workspace_root)
         before = self._workspace.snapshot_workspace_state(workspace_root=workspace_root)
         try:
@@ -348,12 +382,21 @@ class DeliveryExecutor:
             allow_recovery_validation = not (
                 failure_class in {"provider_transient_error", "provider_first_turn_stall"}
                 and build_ok is not True
-                and not changed_files
             )
-            if (artifact_paths or changed_files) and allow_recovery_validation:
-                validation = self._run_workspace_validation_commands(
+            recovery_validation_requested = bool(validation_commands) or build_ok is not None
+            recovery_validation_inputs_present = bool(changed_files) or build_ok is True or workspace_bootstrapped
+            if (
+                recovery_validation_inputs_present
+                and allow_recovery_validation
+                and recovery_validation_requested
+            ):
+                resolved_validation_commands = self._resolved_workspace_validation_commands(
                     workspace_root=workspace_root,
                     commands=validation_commands,
+                )
+                validation = self._run_workspace_validation_commands(
+                    workspace_root=workspace_root,
+                    commands=resolved_validation_commands,
                 )
                 validation_command = validation.command or ""
                 validation_summary = validation.summary or ""
@@ -393,9 +436,13 @@ class DeliveryExecutor:
         changed_files = self._workspace.changed_workspace_files(before=before, after=after)
         if not changed_files:
             changed_files = extract_target_files(self._trace.export(), repo_root=str(workspace_root))
-        validation = self._run_workspace_validation_commands(
+        resolved_validation_commands = self._resolved_workspace_validation_commands(
             workspace_root=workspace_root,
             commands=validation_commands,
+        )
+        validation = self._run_workspace_validation_commands(
+            workspace_root=workspace_root,
+            commands=resolved_validation_commands,
         )
         artifact_paths = self._workspace.infer_artifact_paths(
             changed_files=changed_files,
@@ -460,9 +507,13 @@ class DeliveryExecutor:
             validation_ok = False
             failure_reason = validation_summary
         else:
-            validation = self._run_workspace_validation_commands(
+            resolved_validation_commands = self._resolved_workspace_validation_commands(
                 workspace_root=workspace_root,
                 commands=validation_commands,
+            )
+            validation = self._run_workspace_validation_commands(
+                workspace_root=workspace_root,
+                commands=resolved_validation_commands,
             )
             validation_command = validation.command or ""
             validation_summary = validation.summary or ""

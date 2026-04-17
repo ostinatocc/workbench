@@ -6,37 +6,6 @@ import types
 from pathlib import Path
 import subprocess
 
-deepagents = types.ModuleType("deepagents")
-deepagents.create_deep_agent = lambda *args, **kwargs: None
-sys.modules.setdefault("deepagents", deepagents)
-
-backends = types.ModuleType("deepagents.backends")
-
-
-class _LocalShellBackend:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-backends.LocalShellBackend = _LocalShellBackend
-sys.modules.setdefault("deepagents.backends", backends)
-
-filesystem = types.ModuleType("deepagents.middleware.filesystem")
-filesystem.FilesystemMiddleware = type("FilesystemMiddleware", (), {})
-sys.modules.setdefault("deepagents.middleware.filesystem", filesystem)
-
-memory = types.ModuleType("deepagents.middleware.memory")
-memory.MemoryMiddleware = type("MemoryMiddleware", (), {})
-sys.modules.setdefault("deepagents.middleware.memory", memory)
-
-patch_tool_calls = types.ModuleType("deepagents.middleware.patch_tool_calls")
-patch_tool_calls.PatchToolCallsMiddleware = type("PatchToolCallsMiddleware", (), {})
-sys.modules.setdefault("deepagents.middleware.patch_tool_calls", patch_tool_calls)
-
-summarization = types.ModuleType("deepagents.middleware.summarization")
-summarization.create_summarization_middleware = lambda *args, **kwargs: None
-sys.modules.setdefault("deepagents.middleware.summarization", summarization)
-
 dotenv = types.ModuleType("dotenv")
 dotenv.load_dotenv = lambda *args, **kwargs: None
 sys.modules.setdefault("dotenv", dotenv)

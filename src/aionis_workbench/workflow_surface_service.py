@@ -45,11 +45,17 @@ def _validation_command_looks_runnable(command: str, repo_root: str) -> bool:
     if runner.startswith("python") or runner in {"python", "python3", "python3.11", "sh", "bash", "zsh"}:
         filtered = [arg for arg in args if arg]
         if filtered:
-            if filtered[0] == "-m":
+            if filtered[0] in {"-m", "-c"}:
                 return True
             candidate = next((arg for arg in filtered if not arg.startswith("-")), None)
             if candidate == "m":
                 return True
+            if candidate == "c":
+                return True
+    if runner == "node":
+        filtered = [arg for arg in args if arg]
+        if filtered and filtered[0] in {"-e", "--eval"}:
+            return True
     if not candidate:
         return True
     candidate_path = Path(candidate)

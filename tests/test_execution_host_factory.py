@@ -11,7 +11,7 @@ from aionis_workbench.tracing import TraceRecorder
 
 def _base_config(tmp_path) -> WorkbenchConfig:
     return WorkbenchConfig(
-        execution_host_runtime="deepagents",
+        execution_host_runtime="openai_agents",
         model="gpt-5",
         system_prompt=None,
         provider="offline",
@@ -30,7 +30,7 @@ def _base_config(tmp_path) -> WorkbenchConfig:
     )
 
 
-def test_build_execution_host_uses_deepagents_by_default(tmp_path, monkeypatch) -> None:
+def test_build_execution_host_uses_openai_agents_by_default(tmp_path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class _FakeHost:
@@ -38,7 +38,7 @@ def test_build_execution_host_uses_deepagents_by_default(tmp_path, monkeypatch) 
             captured["config"] = config
             captured["trace"] = trace
 
-    monkeypatch.setattr("aionis_workbench.execution_host_factory.DeepagentsExecutionHost", _FakeHost)
+    monkeypatch.setattr("aionis_workbench.execution_host_factory.OpenAIAgentsExecutionHost", _FakeHost)
 
     config = _base_config(tmp_path)
     trace = TraceRecorder()
@@ -47,27 +47,6 @@ def test_build_execution_host_uses_deepagents_by_default(tmp_path, monkeypatch) 
     assert isinstance(host, _FakeHost)
     assert captured["config"] is config
     assert captured["trace"] is trace
-
-
-def test_build_execution_host_rejects_unsupported_runtime(tmp_path) -> None:
-    config = replace(_base_config(tmp_path), execution_host_runtime="openai_agents")
-    captured: dict[str, object] = {}
-
-    class _FakeOpenAIHost:
-        def __init__(self, *, config, trace) -> None:
-            captured["config"] = config
-            captured["trace"] = trace
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr("aionis_workbench.execution_host_factory.OpenAIAgentsExecutionHost", _FakeOpenAIHost)
-    try:
-        trace = TraceRecorder()
-        host = build_execution_host(config=config, trace=trace)
-        assert isinstance(host, _FakeOpenAIHost)
-        assert captured["config"] is config
-        assert captured["trace"] is trace
-    finally:
-        monkeypatch.undo()
 
 
 def test_build_execution_host_rejects_unknown_runtime(tmp_path) -> None:

@@ -106,7 +106,7 @@ class DispatchWorkbench:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -134,7 +134,7 @@ class DispatchWorkbench:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -170,7 +170,7 @@ class DispatchWorkbench:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -214,7 +214,7 @@ class DispatchWorkbench:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -241,7 +241,7 @@ class DispatchWorkbench:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -267,7 +267,7 @@ class DispatchWorkbench:
                 "product_shell": {"name": "aionis_cli"},
                 "learning_engine": {"name": "workbench_engine"},
                 "execution_host": {
-                    "name": "deepagents_local_shell",
+                    "name": "openai_agents_local_shell",
                     "mode": "inspect_only",
                     "health_status": "offline",
                     "health_reason": "model_credentials_missing",
@@ -1859,7 +1859,7 @@ def test_dispatch_blocks_resume_when_controller_disallows_resume() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -1906,7 +1906,7 @@ def test_dispatch_returns_error_without_exiting_on_run_failure() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -1940,7 +1940,7 @@ def test_dispatch_preflights_run_before_invoking_broken_live_path() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -1986,7 +1986,7 @@ def test_dispatch_returns_run_preflight_payload_without_invoking_live_path() -> 
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2030,7 +2030,7 @@ def test_dispatch_returns_run_preflight_one_line_payload() -> None:
             return {
                 "contract": {
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2060,7 +2060,7 @@ def test_dispatch_returns_structured_resume_error_when_host_is_degraded() -> Non
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2091,7 +2091,7 @@ def test_dispatch_preflights_resume_before_invoking_broken_live_path() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "inspect_only",
                         "health_status": "offline",
                         "health_reason": "model_credentials_missing",
@@ -2132,7 +2132,7 @@ def test_dispatch_returns_resume_preflight_payload_without_invoking_live_path() 
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -2169,7 +2169,7 @@ def test_dispatch_returns_resume_preflight_one_line_payload() -> None:
             return {
                 "contract": {
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",
@@ -2213,7 +2213,7 @@ def test_dispatch_returns_runtime_degraded_recovery_for_run_preflight() -> None:
                     "product_shell": {"name": "aionis_cli"},
                     "learning_engine": {"name": "workbench_engine"},
                     "execution_host": {
-                        "name": "deepagents_local_shell",
+                        "name": "openai_agents_local_shell",
                         "mode": "live_enabled",
                         "health_status": "available",
                         "health_reason": "",

@@ -13,7 +13,7 @@ Audience:
 
 Aionis Workbench is a multi-agent coding workbench built on top of:
 
-- `deepagents` as the execution substrate
+- `openai-agents-python` as the execution substrate
 - `Aionis Core` as the continuity and replay kernel
 - `aionis-workbench` as the product control plane
 
@@ -55,7 +55,7 @@ It is not a full market-facing product shell yet. Today it is best described as:
 
 - a production-oriented product kernel
 - a CLI-first workbench engine
-- a structured continuity and collaboration layer on top of `deepagents`
+- a structured continuity and collaboration layer on top of `openai-agents-python`
 
 ## External Beta Command Surface
 
@@ -95,7 +95,7 @@ flowchart TD
     WB --> PACKET["Execution Packet + Provenance"]
     WB --> CTX["Context Layers + Canonical Views"]
     WB --> REC["Recovery / Timeout / Rollback / Correction"]
-    WB --> DS["deepagents Execution Substrate"]
+    WB --> DS["openai-agents-python Execution Substrate"]
     WB --> CORE["Aionis Core Continuity Kernel"]
     DS --> REPO["Target Repository / Real Task Repo"]
     CORE --> STORE["Project Session Store"]
@@ -111,7 +111,7 @@ flowchart TD
 
 Current substrate:
 
-- `deepagents`
+- `openai-agents-python`
 
 Responsibility:
 
@@ -714,7 +714,7 @@ Current limits include:
 - no public API layer
 - no long-horizon evaluation dashboard
 - collaboration learning is active, but not yet a fully dynamic routing policy engine
-- execution still depends on `deepagents` as the current substrate
+- execution now runs on `openai-agents-python` as the current substrate
 
 ## What Aionis Adds Today
 

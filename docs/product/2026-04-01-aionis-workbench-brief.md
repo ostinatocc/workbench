@@ -8,7 +8,7 @@ Aionis Workbench is a project-scoped multi-agent coding workbench.
 
 It sits on top of:
 
-- `deepagents` for execution
+- `openai-agents-python` for execution
 - `Aionis Core` for continuity, handoff, and replay
 - `aionis-workbench` for strategy selection, artifact routing, and project memory
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import multiprocessing
 import os
+import queue
 import re
 import signal
 import subprocess
@@ -12,6 +14,20 @@ from pathlib import Path
 from typing import Any
 
 from .config import WorkbenchConfig
+from .execution_host import (
+    ModelInvokeTimeout,
+    _append_trace_failure,
+    _cleanup_delivery_runtime,
+    _delivery_artifact_ready,
+    _delivery_first_response_timeout_seconds,
+    _delivery_progress_timeout_seconds,
+    _delivery_retry_backoff_seconds,
+    _reset_delivery_trace,
+    _should_retry_transient_delivery_error,
+    _trace_has_steps,
+    _trace_step_count,
+    _update_trace_retry_state,
+)
 from .tracing import TraceRecorder
 from .utils import stringify_result
 
@@ -42,6 +58,53 @@ class OpenAIAgentsPreparedAgent:
     delivery_mode: bool = False
 
 
+def _delivery_invoke_worker(  # type: ignore[no-untyped-def]
+    config: WorkbenchConfig,
+    system_parts: list[str],
+    memory_sources: list[str],
+    root_dir: str,
+    task: str,
+    delivery_timeout_seconds: float,
+    model_timeout_seconds: float,
+    trace_path: str,
+    result_queue,
+):
+    trace = TraceRecorder(snapshot_path=trace_path)
+    host = OpenAIAgentsExecutionHost(config=config, trace=trace)
+    try:
+        agent = host.build_delivery_agent(
+            system_parts=system_parts,
+            memory_sources=memory_sources,
+            root_dir=root_dir,
+            model_timeout_seconds_override=model_timeout_seconds,
+        )
+        result = host.invoke(
+            agent,
+            {"messages": [{"role": "user", "content": task}]},
+            timeout_seconds=delivery_timeout_seconds,
+        )
+        artifact = Path(root_dir) / "dist" / "index.html"
+        if artifact.exists():
+            result_queue.put(
+                {
+                    "ok": True,
+                    "result": "Build completed and delivery artifact is ready.",
+                    "trace_path": trace_path,
+                }
+            )
+            return
+        result_queue.put({"ok": True, "result": stringify_result(result), "trace_path": trace_path})
+    except Exception as exc:  # pragma: no cover - exercised via parent retry behavior
+        result_queue.put(
+            {
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc).strip() or type(exc).__name__,
+                "trace_path": trace_path,
+            }
+        )
+
+
 class OpenAIAgentsExecutionHost:
     def __init__(self, *, config: WorkbenchConfig, trace: Any) -> None:
         self._config = config
@@ -56,10 +119,10 @@ class OpenAIAgentsExecutionHost:
     def _dependency_reason(self) -> str | None:
         if not self._dependency_ready():
             return "execution_host_dependency_missing"
-        if not self._provider_ready():
-            return "execution_host_provider_unsupported"
         if not self._config.api_key:
             return "model_credentials_missing"
+        if not self._provider_ready():
+            return "execution_host_provider_unsupported"
         return None
 
     def describe(self) -> dict[str, Any]:
@@ -712,7 +775,7 @@ class OpenAIAgentsExecutionHost:
             instructions += "\n\nRelevant memory sources:\n" + "\n".join(f"- {value}" for value in agent.memory_sources[:16])
         if agent.use_builtin_subagents:
             instructions += (
-                "\n\nBuiltin deepagents subagents are not wired in this execution host yet. "
+                "\n\nBuiltin specialist subagents are not wired in this execution host yet. "
                 "Work as a single orchestrating agent and use the available local tools directly."
             )
         instructions += (
@@ -758,23 +821,178 @@ class OpenAIAgentsExecutionHost:
         timeout_seconds: float | None = None,
         trace_path: str = "",
     ) -> str:
-        previous_snapshot_path = self._trace.snapshot_path
-        self._trace.snapshot_path = trace_path
-        try:
-            agent = self.build_delivery_agent(
-                system_parts=system_parts,
-                memory_sources=memory_sources,
-                root_dir=root_dir,
-                model_timeout_seconds_override=self.live_app_delivery_model_timeout_seconds(),
+        timeout = timeout_seconds or self.live_app_delivery_timeout_seconds()
+        model_timeout = self.live_app_delivery_model_timeout_seconds()
+        max_attempts = 3
+        for attempt_number in range(1, max_attempts + 1):
+            _reset_delivery_trace(trace_path, preserve_retry_metadata=attempt_number > 1)
+            ctx = multiprocessing.get_context("spawn")
+            result_queue = ctx.Queue()
+            process = ctx.Process(
+                target=_delivery_invoke_worker,
+                args=(
+                    self._config,
+                    list(system_parts),
+                    list(memory_sources),
+                    root_dir,
+                    task,
+                    float(timeout),
+                    float(model_timeout),
+                    trace_path,
+                    result_queue,
+                ),
             )
-            result = self.invoke(
-                agent,
-                {"messages": [{"role": "user", "content": task}]},
-                timeout_seconds=timeout_seconds or self.live_app_delivery_timeout_seconds(),
+            process.daemon = True
+            process.start()
+            start_time = time.monotonic()
+            deadline = start_time + float(timeout)
+            first_response_deadline = start_time + _delivery_first_response_timeout_seconds(
+                model_timeout_seconds=float(model_timeout),
+                delivery_timeout_seconds=float(timeout),
             )
-            artifact = Path(root_dir) / "dist" / "index.html"
-            if artifact.exists():
-                return "Build completed and delivery artifact is ready."
-            return stringify_result(result)
-        finally:
-            self._trace.snapshot_path = previous_snapshot_path
+            progress_timeout = _delivery_progress_timeout_seconds(
+                model_timeout_seconds=float(model_timeout),
+                delivery_timeout_seconds=float(timeout),
+            )
+            first_response_timed_out = False
+            progress_timed_out = False
+            last_step_count = 0
+            last_progress_time = start_time
+            while process.is_alive():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                process.join(min(1.0, remaining))
+                if _delivery_artifact_ready(root_dir=root_dir, trace_path=trace_path):
+                    process.terminate()
+                    process.join(5.0)
+                    _cleanup_delivery_runtime(process, result_queue)
+                    return "Build completed and delivery artifact is ready."
+                current_step_count = _trace_step_count(trace_path)
+                if current_step_count > last_step_count:
+                    last_step_count = current_step_count
+                    last_progress_time = time.monotonic()
+                if not _trace_has_steps(trace_path) and time.monotonic() >= first_response_deadline:
+                    process.terminate()
+                    process.join(5.0)
+                    error_type = "ProviderFirstTurnStall"
+                    error_message = (
+                        "provider_first_turn_stall: Delivery agent did not produce a first model/tool step within "
+                        f"{int(_delivery_first_response_timeout_seconds(model_timeout_seconds=float(model_timeout), delivery_timeout_seconds=float(timeout)))} seconds."
+                    )
+                    if attempt_number < max_attempts:
+                        _update_trace_retry_state(
+                            trace_path,
+                            attempt_number=attempt_number,
+                            max_attempts=max_attempts,
+                            error_type=error_type,
+                            error_message=error_message,
+                        )
+                        _cleanup_delivery_runtime(process, result_queue)
+                        time.sleep(_delivery_retry_backoff_seconds(attempt_number))
+                        first_response_timed_out = True
+                        break
+                    _update_trace_retry_state(
+                        trace_path,
+                        attempt_number=attempt_number,
+                        max_attempts=max_attempts,
+                        error_type=error_type,
+                        error_message=error_message,
+                    )
+                    error_message = (
+                        f"Delivery failed after {attempt_number}/{max_attempts} first-response timeouts. "
+                        f"Last error: {error_message}"
+                    )
+                    _append_trace_failure(trace_path, failure_reason=error_message)
+                    _cleanup_delivery_runtime(process, result_queue)
+                    raise ModelInvokeTimeout(error_message)
+                if last_step_count > 0 and time.monotonic() - last_progress_time >= progress_timeout:
+                    process.terminate()
+                    process.join(5.0)
+                    error_type = "TraceProgressTimeout"
+                    error_message = (
+                        "Delivery agent stopped making trace progress for "
+                        f"{int(progress_timeout)} seconds after reaching step {last_step_count}."
+                    )
+                    if attempt_number < max_attempts:
+                        _update_trace_retry_state(
+                            trace_path,
+                            attempt_number=attempt_number,
+                            max_attempts=max_attempts,
+                            error_type=error_type,
+                            error_message=error_message,
+                        )
+                        _cleanup_delivery_runtime(process, result_queue)
+                        time.sleep(_delivery_retry_backoff_seconds(attempt_number))
+                        progress_timed_out = True
+                        break
+                    _update_trace_retry_state(
+                        trace_path,
+                        attempt_number=attempt_number,
+                        max_attempts=max_attempts,
+                        error_type=error_type,
+                        error_message=error_message,
+                    )
+                    error_message = (
+                        f"Delivery failed after {attempt_number}/{max_attempts} trace-progress timeouts. "
+                        f"Last error: {error_message}"
+                    )
+                    _append_trace_failure(trace_path, failure_reason=error_message)
+                    _cleanup_delivery_runtime(process, result_queue)
+                    raise ModelInvokeTimeout(error_message)
+            if first_response_timed_out or progress_timed_out:
+                continue
+            if process.is_alive():
+                process.terminate()
+                process.join(5.0)
+                _append_trace_failure(trace_path, failure_reason=f"Delivery agent exceeded {int(timeout)} seconds.")
+                _cleanup_delivery_runtime(process, result_queue)
+                raise ModelInvokeTimeout(f"Delivery agent exceeded {int(timeout)} seconds.")
+            try:
+                payload = result_queue.get_nowait()
+            except queue.Empty:
+                if process.exitcode not in (0, None):
+                    _append_trace_failure(trace_path, failure_reason=f"Delivery agent exited with code {process.exitcode}.")
+                    _cleanup_delivery_runtime(process, result_queue)
+                    raise RuntimeError(f"Delivery agent exited with code {process.exitcode}.")
+                _append_trace_failure(trace_path, failure_reason="Delivery agent finished without returning a result.")
+                _cleanup_delivery_runtime(process, result_queue)
+                raise RuntimeError("Delivery agent finished without returning a result.")
+            if payload.get("ok") is True:
+                result = str(payload.get("result") or "").strip()
+                _cleanup_delivery_runtime(process, result_queue)
+                return result
+            error_type = str(payload.get("error_type") or "").strip()
+            error_message = str(payload.get("error") or "Delivery agent failed.").strip()
+            if (
+                attempt_number < max_attempts
+                and _should_retry_transient_delivery_error(error_type=error_type, error_message=error_message)
+            ):
+                _update_trace_retry_state(
+                    trace_path,
+                    attempt_number=attempt_number,
+                    max_attempts=max_attempts,
+                    error_type=error_type,
+                    error_message=error_message,
+                )
+                _cleanup_delivery_runtime(process, result_queue)
+                time.sleep(_delivery_retry_backoff_seconds(attempt_number))
+                continue
+            if _should_retry_transient_delivery_error(error_type=error_type, error_message=error_message):
+                _update_trace_retry_state(
+                    trace_path,
+                    attempt_number=attempt_number,
+                    max_attempts=max_attempts,
+                    error_type=error_type,
+                    error_message=error_message,
+                )
+                error_message = (
+                    f"Delivery failed after {attempt_number}/{max_attempts} transient attempts. "
+                    f"Last error: {error_message}"
+                )
+            _append_trace_failure(trace_path, failure_reason=error_message)
+            _cleanup_delivery_runtime(process, result_queue)
+            if error_type in {"ModelInvokeTimeout", "OpenAIAgentsModelInvokeTimeout"}:
+                raise ModelInvokeTimeout(error_message)
+            raise RuntimeError(error_message)
+        raise RuntimeError("Delivery agent exhausted retry attempts without returning a result.")

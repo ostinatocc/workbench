@@ -11,18 +11,12 @@
 
 This repo uses:
 
-- `deepagents` as the current default execution substrate
+- `openai-agents-python` as the default execution substrate
 - `Aionis Core` as the continuity and memory kernel
 
-Execution-host migration toward `openai-agents-python` is planned behind a replaceable host adapter boundary. The current default remains `deepagents`.
+Execution-host migration has now crossed the host-cutover line: `Workbench` runs on `openai-agents-python`, and the legacy `deepagents` execution path has been removed.
 
-Experimental `openai-agents-python` wiring has started behind:
-
-- `WORKBENCH_EXECUTION_HOST=openai_agents`
-- `pip install -e .[openai_agents]`
-- `.github/workflows/workbench-live-openai-agents.yml` for a narrow real-live experimental lane
-
-Current scope is intentionally narrow:
+Current `openai-agents-python` coverage includes:
 
 - host selection
 - host metadata
@@ -30,8 +24,7 @@ Current scope is intentionally narrow:
 - experimental single-agent local tool loop for `build_agent + invoke`
 - experimental delivery loop for `build_delivery_agent + invoke_delivery_task`
 - experimental JSON app-harness live methods for planner/evaluator/negotiator/revisor/replanner/generator
-
-The default execution substrate still remains `deepagents`.
+- `.github/workflows/workbench-live-openai-agents.yml` for a narrow real-live experimental lane
 
 ## Product shape
 
