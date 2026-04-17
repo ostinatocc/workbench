@@ -3,10 +3,27 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from aionis_workbench.e2e.real_e2e.manifest import RealRepoSpec
+
+
+_GIT_NETWORK_RETRYABLE_MARKERS = (
+    "error in the http2 framing layer",
+    "ssl_error_syscall",
+    "the remote end hung up unexpectedly",
+    "connection reset by peer",
+    "connection timed out",
+    "operation timed out",
+    "empty reply from server",
+    "failed to connect",
+    "connection refused",
+    "tlsv1 alert",
+    "proxy connect aborted",
+)
+_GIT_RETRY_ATTEMPTS = 3
 
 
 def _workbench_root() -> Path:
@@ -27,24 +44,61 @@ def repo_metadata_path(repo_entry: RealRepoSpec, cache_root: str | Path | None =
     return real_e2e_cache_root(cache_root) / "repos" / repo_entry.id / "metadata.json"
 
 
-def _run_git(*args: str, cwd: Path) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
+def _git_error_is_retryable(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _GIT_NETWORK_RETRYABLE_MARKERS)
+
+
+def _run_git(*args: str, cwd: Path, retry_attempts: int = 1) -> str:
+    last_error: subprocess.CalledProcessError | None = None
+    for attempt in range(1, retry_attempts + 1):
+        try:
+            result = subprocess.run(
+                ["git", "-c", "http.version=HTTP/1.1", *args],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            stderr = exc.stderr or ""
+            if attempt >= retry_attempts or not _git_error_is_retryable(stderr):
+                raise
+            time.sleep(min(2.0, 0.5 * attempt))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("git command failed without a captured error")
 
 
 def _clone_repo(repo_entry: RealRepoSpec, checkout_path: Path) -> None:
     checkout_path.parent.mkdir(parents=True, exist_ok=True)
-    _run_git("clone", repo_entry.repo_url, str(checkout_path), cwd=checkout_path.parent)
+    if checkout_path.exists():
+        shutil.rmtree(checkout_path)
+    try:
+        _run_git(
+            "clone",
+            repo_entry.repo_url,
+            str(checkout_path),
+            cwd=checkout_path.parent,
+            retry_attempts=_GIT_RETRY_ATTEMPTS,
+        )
+    except subprocess.CalledProcessError:
+        if checkout_path.exists():
+            shutil.rmtree(checkout_path)
+        raise
 
 
 def _fetch_repo(checkout_path: Path) -> None:
-    _run_git("fetch", "--all", "--tags", "--prune", cwd=checkout_path)
+    _run_git(
+        "fetch",
+        "--all",
+        "--tags",
+        "--prune",
+        cwd=checkout_path,
+        retry_attempts=_GIT_RETRY_ATTEMPTS,
+    )
 
 
 def _repo_is_dirty(checkout_path: Path) -> bool:

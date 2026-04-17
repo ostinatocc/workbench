@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from aionis_workbench.e2e.real_e2e import repo_cache as repo_cache_module
 from aionis_workbench.e2e.real_e2e.manifest import RealRepoSpec
 from aionis_workbench.e2e.real_e2e.repo_cache import (
     ensure_repo_cached,
@@ -107,3 +108,50 @@ def test_repo_cache_reclones_dirty_checkout(tmp_path: Path) -> None:
     assert second_checkout_path == checkout_path
     assert (second_checkout_path / "README.md").read_text(encoding="utf-8") == "# real repo\n"
     assert not (second_checkout_path / ".reuse-marker").exists()
+
+
+def test_run_git_retries_retryable_network_failures(monkeypatch) -> None:
+    attempts = {"count": 0}
+    sleeps: list[float] = []
+
+    def _fake_run(args, cwd, check, capture_output, text):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise subprocess.CalledProcessError(
+                returncode=128,
+                cmd=args,
+                stderr="fatal: unable to access 'https://github.com/demo/repo.git/': Error in the HTTP2 framing layer\n",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(repo_cache_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(repo_cache_module.time, "sleep", sleeps.append)
+
+    result = repo_cache_module._run_git("fetch", "--all", cwd=Path("/tmp/repo"), retry_attempts=3)
+
+    assert result == "ok"
+    assert attempts["count"] == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_run_git_does_not_retry_non_network_failures(monkeypatch) -> None:
+    attempts = {"count": 0}
+
+    def _fake_run(args, cwd, check, capture_output, text):
+        attempts["count"] += 1
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=args,
+            stderr="fatal: repository 'https://github.com/demo/missing.git/' not found\n",
+        )
+
+    monkeypatch.setattr(repo_cache_module.subprocess, "run", _fake_run)
+
+    try:
+        repo_cache_module._run_git("clone", "https://github.com/demo/missing.git", "repo", cwd=Path("/tmp"), retry_attempts=3)
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("expected clone failure")
+
+    assert attempts["count"] == 1
