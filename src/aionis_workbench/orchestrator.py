@@ -115,26 +115,48 @@ def _extract_host_delegation_returns(payload: Any) -> list[DelegationReturn]:
         summary = str(item.get("summary") or "").strip()
         if not role or not summary:
             continue
+        evidence = [
+            str(value).strip()
+            for value in list(item.get("evidence") or [])[:4]
+            if str(value).strip()
+        ]
+        working_set = [
+            str(value).strip()
+            for value in list(item.get("working_set") or [])[:8]
+            if str(value).strip()
+        ]
+        acceptance_checks = [
+            str(value).strip()
+            for value in list(item.get("acceptance_checks") or [])[:6]
+            if str(value).strip()
+        ]
+        artifact_refs = [
+            str(value).strip()
+            for value in list(item.get("artifact_refs") or [])[:6]
+            if str(value).strip()
+        ]
+        handoff_text = str(item.get("handoff_text") or "").strip()
+        if not handoff_text:
+            handoff_lines = [f"{role} summary: {summary}"]
+            if working_set:
+                handoff_lines.append("Working set: " + ", ".join(working_set[:8]))
+            if acceptance_checks:
+                handoff_lines.append("Acceptance checks: " + "; ".join(acceptance_checks[:6]))
+            if artifact_refs:
+                handoff_lines.append("Artifact scope: " + "; ".join(artifact_refs[:4]))
+            if evidence:
+                handoff_lines.extend(f"Evidence: {value}" for value in evidence[:3])
+            handoff_text = "\n".join(handoff_lines)
         parsed.append(
             DelegationReturn(
                 role=role,
                 status=status,
                 summary=summary,
-                evidence=[
-                    str(value).strip()
-                    for value in list(item.get("evidence") or [])[:4]
-                    if str(value).strip()
-                ],
-                working_set=[
-                    str(value).strip()
-                    for value in list(item.get("working_set") or [])[:8]
-                    if str(value).strip()
-                ],
-                acceptance_checks=[
-                    str(value).strip()
-                    for value in list(item.get("acceptance_checks") or [])[:6]
-                    if str(value).strip()
-                ],
+                evidence=evidence,
+                working_set=working_set,
+                acceptance_checks=acceptance_checks,
+                artifact_refs=artifact_refs,
+                handoff_text=handoff_text,
             )
         )
     return parsed

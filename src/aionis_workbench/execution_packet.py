@@ -137,6 +137,10 @@ class RoutingSignalSummary:
     routed_role_count: int = 0
     routed_artifact_ref_count: int = 0
     inherited_evidence_count: int = 0
+    implementer_effective_scope: list[str] = field(default_factory=list)
+    implementer_artifact_scope: list[str] = field(default_factory=list)
+    implementer_scope_narrowed: bool = False
+    implementer_scope_source: str = ""
     hit_roles: list[str] = field(default_factory=list)
     miss_roles: list[str] = field(default_factory=list)
     routing_reasons: list[str] = field(default_factory=list)

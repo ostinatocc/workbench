@@ -7,6 +7,7 @@ from .bootstrap import build_bootstrap_snapshot
 from .consolidation import describe_family_prior_seed
 from .consolidation_state import load_consolidation_summary
 from .dream_state import load_dream_promotions
+from .execution_packet import StrategySummary
 from .policies import (
     _derive_task_family,
     normalize_session_memory,
@@ -576,6 +577,22 @@ class SessionService:
             session.selected_family_scope = strategy.family_scope
             session.selected_family_candidate_count = strategy.family_candidate_count
             session.selected_pattern_summaries = strategy.selected_pattern_summaries[:4]
+            session.strategy_summary = StrategySummary(
+                trust_signal=strategy.trust_signal,
+                strategy_profile=strategy.strategy_profile,
+                validation_style=strategy.validation_style,
+                task_family=strategy.task_family,
+                family_scope=strategy.family_scope,
+                family_candidate_count=strategy.family_candidate_count,
+                selected_working_set=self.normalize_target_files(strategy.selected_working_set or session.target_files)[:8],
+                selected_validation_paths=self.normalize_validation_commands(strategy.validation_commands)[:4],
+                selected_role_sequence=strategy.role_sequence[:3],
+                preferred_artifact_refs=strategy.preferred_artifacts[: strategy.artifact_limit],
+                selected_pattern_summaries=strategy.selected_pattern_summaries[:4],
+                artifact_budget=strategy.artifact_limit,
+                memory_source_limit=strategy.memory_source_limit,
+                explanation="; ".join(strategy.memory_lines[:3])[:400],
+            )
             family_prior = _load_family_prior(
                 self._repo_root,
                 self._project_scope,
@@ -600,6 +617,15 @@ class SessionService:
                     session.validation_commands = self.normalize_validation_commands(
                         [prior_validation_command, *session.validation_commands]
                     )
+            if session.strategy_summary:
+                session.strategy_summary.strategy_profile = session.selected_strategy_profile
+                session.strategy_summary.validation_style = session.selected_validation_style
+                session.strategy_summary.selected_working_set = self.normalize_target_files(
+                    strategy.selected_working_set or session.target_files
+                )[:8]
+                session.strategy_summary.selected_validation_paths = self.normalize_validation_commands(
+                    session.validation_commands
+                )[:4]
         if seed_priors:
             seeded_artifacts: list[ArtifactReference] = []
             seen_artifacts: set[tuple[str, str, str]] = set()

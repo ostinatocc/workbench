@@ -232,7 +232,7 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
     )
     (tmp_path / "README.md").write_text("seed file\n", encoding="utf-8")
 
-    captures: list[dict[str, str]] = []
+    captures: list[dict[str, object]] = []
 
     class _FakeAgent:
         def __init__(self, *, name, instructions, model, tools) -> None:
@@ -249,13 +249,14 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
                     "name": str(agent.name),
                     "instructions": str(agent.instructions),
                     "user_input": str(user_input),
+                    "tools": sorted(tool.__name__ for tool in agent.tools),
                 }
             )
             if "investigator" in str(agent.name).lower():
                 return SimpleNamespace(final_output="Localized the failure in src/demo.py\nRoot cause: export mismatch")
             if "implementer" in str(agent.name).lower():
                 tools = {tool.__name__: tool for tool in agent.tools}
-                tools["write_file"]("fix.txt", "implemented\n")
+                tools["write_file"]("src/demo.py", "implemented\n")
                 return SimpleNamespace(final_output="Applied the narrow fix in src/demo.py\nTouched files: src/demo.py")
             return SimpleNamespace(final_output="Validation passed.\nCommand: python3 -m pytest -q")
 
@@ -292,9 +293,12 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
                 {
                     "role": "implementer",
                     "mission": "Apply the narrow fix.",
-                    "working_set": ["src/demo.py"],
+                    "working_set": ["src", "README.md"],
                     "acceptance_checks": ["python3 -m pytest -q"],
                     "output_contract": "Return touched files.",
+                    "preferred_artifact_refs": [".aionis-workbench/artifacts/investigator.json"],
+                    "inherited_evidence": ["Investigator summary: export mismatch in src/demo.py"],
+                    "routing_reason": "Implementer inherits the narrow diagnosis before editing.",
                 },
                 {
                     "role": "verifier",
@@ -311,14 +315,207 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
     assert output["role_sequence"] == ["investigator", "implementer", "verifier"]
     assert [item["role"] for item in output["delegation_returns"]] == ["investigator", "implementer", "verifier"]
     assert output["delegation_returns"][0]["working_set"] == ["src/demo.py"]
+    assert output["delegation_returns"][1]["working_set"] == ["src/demo.py"]
     assert output["delegation_returns"][2]["acceptance_checks"] == ["python3 -m pytest -q"]
+    assert output["delegation_returns"][0]["handoff_text"].startswith("investigator summary:")
+    assert output["delegation_returns"][1]["artifact_refs"] == [".aionis-workbench/artifacts/investigator.json"]
     assert "[investigator] Localized the failure in src/demo.py" in output["final_output"]
-    assert (tmp_path / "fix.txt").read_text(encoding="utf-8") == "implemented\n"
+    assert (tmp_path / "src" / "demo.py").read_text(encoding="utf-8") == "implemented\n"
     assert len(captures) == 3
     assert "Previous specialist handoffs:" in captures[1]["instructions"]
+    assert "Effective edit scope: src/demo.py" in captures[1]["instructions"]
+    assert "Routed artifacts: .aionis-workbench/artifacts/investigator.json" in captures[1]["instructions"]
+    assert "Routing reason: Implementer inherits the narrow diagnosis before editing." in captures[1]["instructions"]
+    assert captures[0]["tools"] == ["exec_command", "list_files", "read_file"]
+    assert captures[1]["tools"] == ["exec_command", "list_files", "read_file", "write_file"]
+    assert captures[2]["tools"] == ["exec_command", "list_files", "read_file"]
     trace_steps = host._trace.export()
     assert [step.tool_name for step in trace_steps].count("workbench.model") == 3
     assert [step.tool_name for step in trace_steps].count("write_file") == 1
+
+
+def test_openai_agents_execution_host_blocks_mutating_commands_for_role_shells(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+
+    def _fake_function_tool(fn):
+        return fn
+
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (object, object, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    investigator_tools = {
+        tool.__name__: tool
+        for tool in host._build_function_tools(
+            root_dir=str(tmp_path),
+            recorder=host._trace,
+            delivery_mode=False,
+            allowed_tool_names={"exec_command"},
+            role_name="investigator",
+            working_set=["src/demo.py"],
+        )
+    }
+    verifier_tools = {
+        tool.__name__: tool
+        for tool in host._build_function_tools(
+            root_dir=str(tmp_path),
+            recorder=host._trace,
+            delivery_mode=False,
+            allowed_tool_names={"exec_command"},
+            role_name="verifier",
+            working_set=["src/demo.py"],
+        )
+    }
+    implementer_tools = {
+        tool.__name__: tool
+        for tool in host._build_function_tools(
+            root_dir=str(tmp_path),
+            recorder=host._trace,
+            delivery_mode=False,
+            allowed_tool_names={"exec_command"},
+            role_name="implementer",
+            working_set=["src/demo.py"],
+        )
+    }
+
+    with pytest.raises(ValueError, match="investigator may only run read-only commands"):
+        investigator_tools["exec_command"]("touch blocked.txt")
+    with pytest.raises(ValueError, match="verifier may only run read-only commands"):
+        verifier_tools["exec_command"]("git apply patch.diff")
+    with pytest.raises(ValueError, match="implementer may only mutate files via write_file"):
+        implementer_tools["exec_command"]("touch src/demo.py")
+
+
+def test_openai_agents_execution_host_implementer_writes_only_inside_working_set(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+
+    def _fake_function_tool(fn):
+        return fn
+
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (object, object, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    tools = {
+        tool.__name__: tool
+        for tool in host._build_function_tools(
+            root_dir=str(tmp_path),
+            recorder=host._trace,
+            delivery_mode=False,
+            allowed_tool_names={"write_file"},
+            role_name="implementer",
+            working_set=["src/demo.py", "tests/"],
+        )
+    }
+
+    tools["write_file"]("src/demo.py", "ok\n")
+    tools["write_file"]("tests/output.txt", "ok\n")
+    assert (tmp_path / "src" / "demo.py").read_text(encoding="utf-8") == "ok\n"
+    assert (tmp_path / "tests" / "output.txt").read_text(encoding="utf-8") == "ok\n"
+
+    with pytest.raises(ValueError, match="implementer may only write inside the delegated working set"):
+        tools["write_file"]("README.md", "blocked\n")
+
+
+def test_openai_agents_execution_host_implementer_reads_only_working_set_and_artifact_scope(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "demo.py").write_text("demo\n", encoding="utf-8")
+    (tmp_path / ".aionis-workbench" / "artifacts").mkdir(parents=True)
+    (tmp_path / ".aionis-workbench" / "artifacts" / "investigator.json").write_text(
+        "{\"summary\":\"artifact\"}\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("blocked\n", encoding="utf-8")
+
+    def _fake_function_tool(fn):
+        return fn
+
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (object, object, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    tools = {
+        tool.__name__: tool
+        for tool in host._build_function_tools(
+            root_dir=str(tmp_path),
+            recorder=host._trace,
+            delivery_mode=False,
+            allowed_tool_names={"read_file", "list_files"},
+            role_name="implementer",
+            working_set=["src/demo.py"],
+            preferred_artifact_refs=[".aionis-workbench/artifacts/investigator.json"],
+        )
+    }
+
+    assert tools["read_file"]("src/demo.py") == "demo\n"
+    assert "\"artifact\"" in tools["read_file"](".aionis-workbench/artifacts/investigator.json")
+    listed_src = json.loads(tools["list_files"]("src"))
+    listed_artifacts = json.loads(tools["list_files"](".aionis-workbench/artifacts"))
+    assert listed_src["items"] == ["src/demo.py"]
+    assert listed_artifacts["items"] == [".aionis-workbench/artifacts/investigator.json"]
+
+    with pytest.raises(ValueError, match="implementer may only read inside the delegated working set or routed artifact scope"):
+        tools["read_file"]("README.md")
+    with pytest.raises(ValueError, match="implementer may only inspect inside the delegated working set or routed artifact scope"):
+        tools["list_files"](".")
+
+
+def test_openai_agents_execution_host_narrows_implementer_effective_working_set_from_investigator_scope(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+
+    narrowed = host._effective_working_set_for_role(
+        role="implementer",
+        packet={"working_set": ["src", "README.md"]},
+        prior_returns=[
+            {
+                "role": "investigator",
+                "working_set": ["src/demo.py"],
+            }
+        ],
+    )
+    untouched = host._effective_working_set_for_role(
+        role="implementer",
+        packet={"working_set": ["src", "README.md"]},
+        prior_returns=[
+            {
+                "role": "investigator",
+                "working_set": ["docs/guide.md"],
+            }
+        ],
+    )
+
+    assert narrowed == ["src/demo.py"]
+    assert untouched == ["src", "README.md"]
 
 
 def test_openai_agents_execution_host_build_delivery_agent_marks_delivery_mode(tmp_path, monkeypatch) -> None:

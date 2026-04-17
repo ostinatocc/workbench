@@ -59,6 +59,27 @@ def build_provenance_surfaces(
     trusted_pattern_summaries = list(
         dict.fromkeys(f"[{item.role}/{item.kind}] {item.summary}" for item in trusted_patterns[:6])
     )[:4]
+    existing_strategy = session.strategy_summary
+    preferred_artifact_refs = (
+        existing_strategy.preferred_artifact_refs[:3]
+        if existing_strategy and existing_strategy.preferred_artifact_refs
+        else preferred_artifact_refs
+    )
+    selected_working_set = (
+        existing_strategy.selected_working_set[:6]
+        if existing_strategy and existing_strategy.selected_working_set
+        else packet.target_files[:6]
+    )
+    selected_validation_paths = (
+        existing_strategy.selected_validation_paths[:3]
+        if existing_strategy and existing_strategy.selected_validation_paths
+        else packet.pending_validations[:3]
+    )
+    selected_pattern_summaries = (
+        existing_strategy.selected_pattern_summaries[:4]
+        if existing_strategy and existing_strategy.selected_pattern_summaries
+        else session.selected_pattern_summaries[:4]
+    )
     planner_packet = PlannerPacket(
         packet_version=packet.packet_version,
         current_stage=packet.current_stage,
@@ -88,10 +109,10 @@ def build_provenance_surfaces(
         task_family=session.selected_task_family,
         family_scope=session.selected_family_scope,
         family_candidate_count=session.selected_family_candidate_count,
-        selected_working_set=packet.target_files[:6],
-        selected_validation_paths=packet.pending_validations[:3],
+        selected_working_set=selected_working_set,
+        selected_validation_paths=selected_validation_paths,
         selected_role_sequence=role_sequence,
-        selected_pattern_summaries=session.selected_pattern_summaries[:4],
+        selected_pattern_summaries=selected_pattern_summaries,
         preferred_artifact_refs=preferred_artifact_refs,
         artifact_budget=session.selected_artifact_budget,
         memory_source_limit=session.selected_memory_source_limit,
@@ -121,6 +142,9 @@ def build_provenance_surfaces(
     routing_reasons: list[str] = []
     routed_artifact_ref_count = 0
     inherited_evidence_count = 0
+    trusted_effective_scope = any(pattern.kind == "effective_edit_scope_strategy" for pattern in trusted_patterns)
+    return_by_role = {item.role: item for item in session.delegation_returns if getattr(item, "role", "")}
+    packet_by_role = {item.role: item for item in session.delegation_packets if getattr(item, "role", "")}
     for delegation_packet in session.delegation_packets:
         has_artifacts = bool(delegation_packet.preferred_artifact_refs)
         has_evidence = bool(delegation_packet.inherited_evidence)
@@ -139,6 +163,53 @@ def build_provenance_surfaces(
         routed_role_count=len(hit_roles),
         routed_artifact_ref_count=routed_artifact_ref_count,
         inherited_evidence_count=inherited_evidence_count,
+        implementer_effective_scope=(
+            return_by_role["implementer"].working_set[:6]
+            if "implementer" in return_by_role
+            else []
+        ),
+        implementer_artifact_scope=(
+            (
+                return_by_role["implementer"].artifact_refs
+                or packet_by_role["implementer"].preferred_artifact_refs
+            )[:4]
+            if "implementer" in return_by_role and "implementer" in packet_by_role
+            else (
+                return_by_role["implementer"].artifact_refs[:4]
+                if "implementer" in return_by_role
+                else (
+                    packet_by_role["implementer"].preferred_artifact_refs[:4]
+                    if "implementer" in packet_by_role
+                    else []
+                )
+            )
+        ),
+        implementer_scope_narrowed=(
+            "implementer" in return_by_role
+            and bool(return_by_role["implementer"].working_set)
+            and (
+                (
+                    "implementer" in packet_by_role
+                    and return_by_role["implementer"].working_set[:6] != packet_by_role["implementer"].working_set[:6]
+                )
+                or trusted_effective_scope
+            )
+        ),
+        implementer_scope_source=(
+            "investigator_narrowed"
+            if (
+                "implementer" in return_by_role
+                and bool(return_by_role["implementer"].working_set)
+                and (
+                    (
+                        "implementer" in packet_by_role
+                        and return_by_role["implementer"].working_set[:6] != packet_by_role["implementer"].working_set[:6]
+                    )
+                    or trusted_effective_scope
+                )
+            )
+            else "delegation_packet"
+        ),
         hit_roles=hit_roles[:6],
         miss_roles=miss_roles[:6],
         routing_reasons=routing_reasons[:6],

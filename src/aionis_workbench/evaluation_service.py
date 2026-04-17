@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from .aionis_bridge import _build_task_session_transition_guards
 from .controller_shell import controller_action_bar_payload
+from .controller_state import apply_session_controller_gates
 from .doc_learning import build_doc_learning_record
 from .execution_packet import InstrumentationSummary
 from .failure_classification import classify_execution_failure_reason
@@ -70,7 +71,7 @@ def _controller_view_from_session(session: SessionState) -> dict[str, Any]:
         and str(item.get("action") or "").strip()
         and str(item.get("reason") or "").strip()
     ][:6]
-    return {
+    controller = {
         "status": controller_status,
         "allowed_actions": [
             str(item.get("action") or "").strip()
@@ -89,6 +90,7 @@ def _controller_view_from_session(session: SessionState) -> dict[str, Any]:
         "projection_source": "session_status",
         "source_status": str(session.status or ""),
     }
+    return apply_session_controller_gates(controller, session) or controller
 
 
 class EvaluationService:
@@ -429,6 +431,10 @@ class EvaluationService:
                     "routed_role_count": routing.routed_role_count if routing else 0,
                     "routed_artifact_ref_count": routing.routed_artifact_ref_count if routing else 0,
                     "inherited_evidence_count": routing.inherited_evidence_count if routing else 0,
+                    "implementer_effective_scope": routing.implementer_effective_scope[:6] if routing else [],
+                    "implementer_artifact_scope": routing.implementer_artifact_scope[:4] if routing else [],
+                    "implementer_scope_narrowed": routing.implementer_scope_narrowed if routing else False,
+                    "implementer_scope_source": routing.implementer_scope_source if routing else "",
                     "hit_roles": routing.hit_roles[:6] if routing else [],
                     "miss_roles": routing.miss_roles[:6] if routing else [],
                     "routing_reasons": routing.routing_reasons[:6] if routing else [],

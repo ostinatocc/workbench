@@ -20,6 +20,7 @@ from .tracing import TraceStep, extract_target_files, normalize_target_paths
 @dataclass
 class StrategySelection:
     target_files: list[str]
+    selected_working_set: list[str]
     validation_commands: list[str]
     memory_lines: list[str]
     artifact_limit: int = 6
@@ -508,6 +509,16 @@ def seed_continuity_snapshot(
         trusted_pattern_summaries: list[str] = list(snapshot.get("trusted_pattern_summaries", [])[:4]) if isinstance(snapshot.get("trusted_pattern_summaries"), list) else []
         for prior in prior_sessions[:3]:
             prior_snapshot = prior.continuity_snapshot or {}
+            implementer_return = next(
+                (item for item in prior.delegation_returns if getattr(item, "role", "") == "implementer"),
+                None,
+            )
+            if implementer_return:
+                prior_strategy_working_sets.extend(implementer_return.working_set[:2])
+                prior_artifact_refs.extend(implementer_return.artifact_refs[:2])
+            if prior.routing_signal_summary:
+                prior_strategy_working_sets.extend(prior.routing_signal_summary.implementer_effective_scope[:2])
+                prior_artifact_refs.extend(prior.routing_signal_summary.implementer_artifact_scope[:2])
             if prior.strategy_summary:
                 prior_strategy_working_sets.extend(prior.strategy_summary.selected_working_set[:2])
                 prior_strategy_validations.extend(prior.strategy_summary.selected_validation_paths[:2])
@@ -617,6 +628,24 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
         snapshot["workflow_mode"] = session.workflow_signal_summary.workflow_mode
     elif prior_snapshot.get("workflow_mode"):
         snapshot["workflow_mode"] = prior_snapshot["workflow_mode"]
+    if session.routing_signal_summary:
+        if session.routing_signal_summary.implementer_effective_scope:
+            snapshot["implementer_effective_scope"] = session.routing_signal_summary.implementer_effective_scope[:8]
+        if session.routing_signal_summary.implementer_artifact_scope:
+            snapshot["implementer_artifact_scope"] = session.routing_signal_summary.implementer_artifact_scope[:6]
+        if session.routing_signal_summary.implementer_scope_source:
+            snapshot["implementer_scope_source"] = session.routing_signal_summary.implementer_scope_source
+        if session.routing_signal_summary.implementer_scope_narrowed:
+            snapshot["implementer_scope_narrowed"] = True
+    else:
+        if isinstance(prior_snapshot.get("implementer_effective_scope"), list):
+            snapshot["implementer_effective_scope"] = prior_snapshot["implementer_effective_scope"][:8]
+        if isinstance(prior_snapshot.get("implementer_artifact_scope"), list):
+            snapshot["implementer_artifact_scope"] = prior_snapshot["implementer_artifact_scope"][:6]
+        if prior_snapshot.get("implementer_scope_source"):
+            snapshot["implementer_scope_source"] = str(prior_snapshot["implementer_scope_source"])
+        if prior_snapshot.get("implementer_scope_narrowed") is True:
+            snapshot["implementer_scope_narrowed"] = True
     if session.pattern_signal_summary and session.pattern_signal_summary.trusted_patterns:
         snapshot["trusted_pattern_summaries"] = session.pattern_signal_summary.trusted_patterns[:4]
     elif isinstance(prior_snapshot.get("trusted_pattern_summaries"), list):
@@ -676,6 +705,9 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
         prior_collaboration_patterns = list(prior_snapshot["prior_collaboration_patterns"][:4]) + prior_collaboration_patterns
     if isinstance(prior_snapshot.get("prior_artifact_refs"), list):
         prior_artifact_refs = list(prior_snapshot["prior_artifact_refs"][:6]) + prior_artifact_refs
+    if session.routing_signal_summary:
+        prior_strategy_working_sets = session.routing_signal_summary.implementer_effective_scope[:4] + prior_strategy_working_sets
+        prior_artifact_refs = session.routing_signal_summary.implementer_artifact_scope[:6] + prior_artifact_refs
     selected_pattern_artifact_refs = _extract_artifact_refs_from_text(
         list(session.strategy_summary.selected_pattern_summaries[:4]) if session.strategy_summary else []
     )
@@ -855,7 +887,19 @@ def refresh_delegation_packets(session: SessionState) -> None:
         target_files=session.target_files,
         validation_commands=session.validation_commands,
     )
+    latest_returns = {item.role: item for item in session.delegation_returns[:6]}
+    strategy_working_set = (
+        session.strategy_summary.selected_working_set[:8]
+        if session.strategy_summary and session.strategy_summary.selected_working_set
+        else []
+    )
     for packet in packets:
+        if packet.role == "implementer":
+            implementer_return = latest_returns.get("implementer")
+            if implementer_return and implementer_return.working_set:
+                packet.working_set = implementer_return.working_set[:8]
+            elif strategy_working_set:
+                packet.working_set = strategy_working_set[:8]
         refs, evidence, reason = _artifact_routing_for_role(session, packet.role)
         packet.preferred_artifact_refs = refs
         packet.inherited_evidence = evidence
@@ -1150,6 +1194,7 @@ def _build_collaboration_patterns(
     patterns: list[CollaborationPattern] = []
     task_signature, task_family, error_family = _session_task_metadata(session)
     artifact_by_role = {}
+    packet_by_role = {item.role: item for item in session.delegation_packets}
     for artifact in session.artifacts:
         artifact_by_role.setdefault(artifact.role, artifact)
     successful_roles: list[str] = []
@@ -1189,6 +1234,42 @@ def _build_collaboration_patterns(
                     error_family=error_family,
                 )
             )
+            source_packet = packet_by_role.get(item.role)
+            packet_scope = list(source_packet.working_set[:8]) if source_packet else []
+            if packet_scope and packet_scope[:4] != item.working_set[:4]:
+                patterns.append(
+                    CollaborationPattern(
+                        kind="effective_edit_scope_strategy",
+                        role=item.role,
+                        summary=f"Start implementation from the narrowed scope {focus} before widening back to the original packet.",
+                        reuse_hint=",".join(item.working_set[:6]),
+                        confidence=0.8,
+                        evidence=_unique_preserve_order(
+                            [
+                                f"Original packet scope: {', '.join(packet_scope[:4])}",
+                                *item.evidence[:2],
+                            ],
+                            limit=4,
+                        ),
+                        task_signature=task_signature,
+                        task_family=task_family,
+                        error_family=error_family,
+                    )
+                )
+            if item.artifact_refs:
+                patterns.append(
+                    CollaborationPattern(
+                        kind="artifact_scope_strategy",
+                        role=item.role,
+                        summary=f"Anchor implementer context to {', '.join(item.artifact_refs[:2])} before widening repo reads.",
+                        reuse_hint=",".join(item.artifact_refs[:4]),
+                        confidence=0.76,
+                        evidence=_unique_preserve_order(item.evidence[:3], limit=3),
+                        task_signature=task_signature,
+                        task_family=task_family,
+                        error_family=error_family,
+                    )
+                )
         elif item.role == "verifier" and validation_ok is True:
             checks = item.acceptance_checks[:2]
             command = validation_command or (checks[0] if checks else "")
@@ -1696,10 +1777,10 @@ def _choose_strategy_profile(
     selected_patterns: list[CollaborationPattern],
     preferred_artifacts: list[str],
 ) -> tuple[str, str, list[str], int, int]:
-    has_working_set = any(item.kind == "working_set_strategy" for item in selected_patterns)
+    has_working_set = any(item.kind in {"working_set_strategy", "effective_edit_scope_strategy"} for item in selected_patterns)
     has_validation = any(item.kind == "validation_strategy" for item in selected_patterns)
     has_artifact_guidance = any(
-        item.kind in {"artifact_reference_strategy", "artifact_routing_strategy"}
+        item.kind in {"artifact_reference_strategy", "artifact_routing_strategy", "artifact_scope_strategy"}
         for item in selected_patterns
     ) or bool(preferred_artifacts)
     recovery_error_family = current_error_family in {
@@ -1760,6 +1841,29 @@ def _choose_strategy_profile(
         6,
         14,
     )
+
+
+def _working_set_specificity(paths: list[str]) -> tuple[int, int, int]:
+    normalized = [Path(value.strip()) for value in paths if isinstance(value, str) and value.strip()]
+    return (
+        sum(len(path.parts) for path in normalized),
+        sum(1 for path in normalized if path.suffix),
+        -len(normalized),
+    )
+
+
+def _prefer_narrower_working_set(current: list[str], candidate: list[str]) -> list[str]:
+    normalized_candidate = [value.strip() for value in candidate if isinstance(value, str) and value.strip()][:8]
+    if not normalized_candidate:
+        return current
+    normalized_current = [value.strip() for value in current if isinstance(value, str) and value.strip()][:8]
+    if not normalized_current:
+        return normalized_candidate
+    if len(normalized_candidate) < len(normalized_current):
+        return normalized_candidate
+    if _working_set_specificity(normalized_candidate) > _working_set_specificity(normalized_current):
+        return normalized_candidate
+    return normalized_current
 
 
 def select_collaboration_strategy(
@@ -1860,7 +1964,7 @@ def select_collaboration_strategy(
                 current_error_family=current_error_family,
             )
             candidate_files = []
-            if pattern.kind in {"working_set_strategy", "implementation_scope"} and pattern.reuse_hint:
+            if pattern.kind in {"working_set_strategy", "implementation_scope", "effective_edit_scope_strategy"} and pattern.reuse_hint:
                 candidate_files = _parse_reuse_hint_files(pattern.reuse_hint)
             else:
                 candidate_files = prior_files
@@ -1878,6 +1982,8 @@ def select_collaboration_strategy(
                 score -= 0.25
             if pattern.kind == "artifact_reference_strategy":
                 score += 0.08
+            if pattern.kind == "effective_edit_scope_strategy":
+                score += 0.14
             if pattern.kind == "artifact_routing_strategy":
                 score += 0.16
                 if affinity_level in {"exact_task_signature", "same_task_family"}:
@@ -1904,18 +2010,21 @@ def select_collaboration_strategy(
     ranked_patterns.sort(key=lambda item: (item[0], len(item[1].evidence), item[1].kind), reverse=True)
     selected_kinds: set[str] = set()
     preferred_artifacts: list[str] = []
+    selected_working_set: list[str] = []
     role_sequence: list[str] = []
     selected_patterns: list[CollaborationPattern] = []
 
     for score, pattern, prior in ranked_patterns:
         if score < 0.65:
             continue
-        if pattern.kind in selected_kinds and pattern.kind not in {"artifact_reference_strategy", "artifact_routing_strategy"}:
+        if pattern.kind in selected_kinds and pattern.kind not in {"artifact_reference_strategy", "artifact_routing_strategy", "artifact_scope_strategy"}:
             continue
-        if pattern.kind in {"working_set_strategy", "implementation_scope"} and pattern.reuse_hint:
-            for item in _parse_reuse_hint_files(pattern.reuse_hint):
+        if pattern.kind in {"working_set_strategy", "implementation_scope", "effective_edit_scope_strategy"} and pattern.reuse_hint:
+            parsed_files = _parse_reuse_hint_files(pattern.reuse_hint)
+            for item in parsed_files:
                 if item not in selected_files:
                     selected_files.append(item)
+            selected_working_set = _prefer_narrower_working_set(selected_working_set, parsed_files)
             memory_lines.append(
                 f"Selected collaboration strategy ({pattern.affinity_level}): [{pattern.role}/{pattern.kind}] {pattern.summary}"
             )
@@ -1937,7 +2046,7 @@ def select_collaboration_strategy(
                 )
                 selected_kinds.add(pattern.kind)
                 selected_patterns.append(pattern)
-        elif pattern.kind in {"artifact_reference_strategy", "artifact_routing_strategy"}:
+        elif pattern.kind in {"artifact_reference_strategy", "artifact_routing_strategy", "artifact_scope_strategy"}:
             matched_paths: list[str] = []
             if pattern.kind == "artifact_reference_strategy":
                 role, _, artifact_kind = pattern.reuse_hint.partition(":")
@@ -2014,9 +2123,12 @@ def select_collaboration_strategy(
     memory_lines.append(f"Selected validation style: {validation_style}")
     if role_sequence:
         memory_lines.append("Applied role sequence: " + " -> ".join(role_sequence[:3]))
+    if not selected_working_set:
+        selected_working_set = selected_files[:8]
 
     return StrategySelection(
         target_files=selected_files[:6] if timeout_affinity >= 0.7 else selected_files[:12],
+        selected_working_set=selected_working_set[:8],
         validation_commands=selected_commands[:1] if validation_style == "baseline_first" else (selected_commands[:2] if validation_style == "targeted_first" else selected_commands[:8]),
         memory_lines=list(dict.fromkeys(memory_lines))[:6],
         artifact_limit=artifact_limit,

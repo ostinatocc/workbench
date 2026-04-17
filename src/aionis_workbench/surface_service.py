@@ -348,6 +348,9 @@ class SurfaceService:
                 "changed_files": observed_changed_files,
                 "summary": "Observed successful validation against the current repo diff.",
             }
+        if session.strategy_summary:
+            session.strategy_summary.selected_working_set = session.target_files[:8]
+            session.strategy_summary.selected_validation_paths = session.validation_commands[:4]
         session.continuity_snapshot = snapshot
         learning_label = "Auto-learned" if auto_absorbed else "Recorded validated"
         learning_lines = [

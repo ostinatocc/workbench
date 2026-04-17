@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import queue
 import re
+import shlex
 import signal
 import subprocess
 import time
@@ -72,6 +73,46 @@ def _first_nonempty_line(text: str) -> str:
         if cleaned:
             return cleaned
     return text.strip()
+
+
+_ROLE_MUTATION_COMMAND_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("rm",),
+    ("mv",),
+    ("cp",),
+    ("mkdir",),
+    ("rmdir",),
+    ("touch",),
+    ("install",),
+    ("chmod",),
+    ("chown",),
+    ("ln",),
+    ("git", "apply"),
+    ("git", "am"),
+    ("git", "checkout"),
+    ("git", "switch"),
+    ("git", "reset"),
+    ("git", "clean"),
+    ("git", "commit"),
+    ("git", "merge"),
+    ("git", "rebase"),
+    ("git", "cherry-pick"),
+    ("git", "restore"),
+    ("npm", "install"),
+    ("npm", "add"),
+    ("npm", "update"),
+    ("npm", "uninstall"),
+    ("pnpm", "install"),
+    ("pnpm", "add"),
+    ("pnpm", "update"),
+    ("pnpm", "remove"),
+    ("yarn", "install"),
+    ("yarn", "add"),
+    ("yarn", "remove"),
+    ("sed", "-i"),
+    ("perl", "-pi"),
+)
+
+_ROLE_MUTATION_TOKEN_MARKERS = (">", ">>", "1>", "2>", "tee ")
 
 
 def _delivery_invoke_worker(  # type: ignore[no-untyped-def]
@@ -256,9 +297,21 @@ class OpenAIAgentsExecutionHost:
         root_dir: str,
         recorder: TraceRecorder,
         delivery_mode: bool,
+        allowed_tool_names: set[str] | None = None,
+        role_name: str = "",
+        working_set: list[str] | None = None,
+        preferred_artifact_refs: list[str] | None = None,
     ) -> list[Any]:
         _, _, function_tool, _, _ = self._import_agents_runtime()
         workspace_root = Path(root_dir)
+        allowed = set(allowed_tool_names or {"exec_command", "read_file", "write_file", "list_files"})
+        normalized_role = role_name.strip()
+        working_set_values = [value.strip() for value in list(working_set or []) if isinstance(value, str) and value.strip()]
+        artifact_scope_values = [
+            value.strip()
+            for value in list(preferred_artifact_refs or [])
+            if isinstance(value, str) and value.strip()
+        ]
 
         def _resolve_path(path: str) -> Path:
             candidate = (path or "").strip()
@@ -268,6 +321,83 @@ class OpenAIAgentsExecutionHost:
             if workspace_root not in resolved.parents and resolved != workspace_root:
                 raise ValueError("path escapes the configured workspace root")
             return resolved
+
+        def _normalize_scope_value(value: str) -> str:
+            candidate = value.strip()
+            if candidate.startswith("./"):
+                candidate = candidate[2:]
+            return candidate
+
+        def _path_in_working_set(resolved: Path) -> bool:
+            if not working_set_values:
+                return True
+            relative_path = resolved.relative_to(workspace_root).as_posix()
+            for value in working_set_values:
+                candidate = _normalize_scope_value(value)
+                if not candidate:
+                    continue
+                if relative_path == candidate:
+                    return True
+                if relative_path.startswith(candidate.rstrip("/") + "/"):
+                    return True
+            return False
+
+        def _path_in_scope_for_read(resolved: Path, scope_values: list[str]) -> bool:
+            if not scope_values:
+                return False
+            relative_path = resolved.relative_to(workspace_root).as_posix()
+            for value in scope_values:
+                candidate = _normalize_scope_value(value)
+                if not candidate:
+                    continue
+                if relative_path == candidate:
+                    return True
+                if relative_path.startswith(candidate.rstrip("/") + "/"):
+                    return True
+                candidate_path = Path(candidate)
+                parent = candidate_path.parent.as_posix()
+                if parent not in {".", ""} and (
+                    relative_path == parent or relative_path.startswith(parent.rstrip("/") + "/")
+                ):
+                    return True
+            return False
+
+        def _path_allowed_for_implementer_read(resolved: Path) -> bool:
+            if not working_set_values and not artifact_scope_values:
+                return True
+            return _path_in_scope_for_read(resolved, working_set_values) or _path_in_scope_for_read(
+                resolved, artifact_scope_values
+            )
+
+        def _command_is_mutating(command: str) -> bool:
+            normalized = command.strip()
+            lowered = normalized.lower()
+            if any(marker in lowered for marker in _ROLE_MUTATION_TOKEN_MARKERS):
+                return True
+            try:
+                tokens = shlex.split(normalized)
+            except ValueError:
+                tokens = normalized.split()
+            lowered_tokens = [token.lower() for token in tokens]
+            for prefix in _ROLE_MUTATION_COMMAND_PREFIXES:
+                if len(lowered_tokens) >= len(prefix) and tuple(lowered_tokens[: len(prefix)]) == prefix:
+                    return True
+            return False
+
+        def _enforce_role_command_policy(command: str) -> None:
+            if not normalized_role:
+                return
+            if not _command_is_mutating(command):
+                return
+            if normalized_role in {"investigator", "verifier"}:
+                raise ValueError(
+                    f"{normalized_role} may only run read-only commands; mutating command blocked: {command.strip()}"
+                )
+            if normalized_role == "implementer":
+                raise ValueError(
+                    "implementer may only mutate files via write_file inside the delegated working set; "
+                    f"mutating shell command blocked: {command.strip()}"
+                )
 
         @function_tool
         def exec_command(command: str, cwd: str = ".") -> str:
@@ -283,6 +413,7 @@ class OpenAIAgentsExecutionHost:
                 from .tracing import sanitize_delivery_execute_command
 
                 normalized_command = sanitize_delivery_execute_command(command)
+            _enforce_role_command_policy(normalized_command)
             working_dir = _resolve_path(cwd)
             env = os.environ.copy()
             env["PWD"] = str(working_dir)
@@ -328,6 +459,11 @@ class OpenAIAgentsExecutionHost:
             """
 
             resolved = _resolve_path(path)
+            if normalized_role == "implementer" and not _path_allowed_for_implementer_read(resolved):
+                raise ValueError(
+                    "implementer may only read inside the delegated working set or routed artifact scope; "
+                    f"blocked path: {resolved.relative_to(workspace_root).as_posix()}"
+                )
             content = resolved.read_text(encoding="utf-8")
             self._record_tool_result(
                 recorder=recorder,
@@ -347,6 +483,10 @@ class OpenAIAgentsExecutionHost:
             """
 
             resolved = _resolve_path(path)
+            if normalized_role == "implementer" and not _path_in_working_set(resolved):
+                raise ValueError(
+                    f"implementer may only write inside the delegated working set; blocked path: {resolved.relative_to(workspace_root).as_posix()}"
+                )
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(content, encoding="utf-8")
             payload = {"path": str(resolved), "chars": len(content)}
@@ -369,6 +509,11 @@ class OpenAIAgentsExecutionHost:
             resolved = _resolve_path(path)
             if not resolved.exists():
                 raise ValueError(f"path does not exist: {path}")
+            if normalized_role == "implementer" and not _path_allowed_for_implementer_read(resolved):
+                raise ValueError(
+                    "implementer may only inspect inside the delegated working set or routed artifact scope; "
+                    f"blocked path: {resolved.relative_to(workspace_root).as_posix()}"
+                )
             if resolved.is_file():
                 items = [resolved.relative_to(workspace_root).as_posix()]
             else:
@@ -386,7 +531,8 @@ class OpenAIAgentsExecutionHost:
             )
             return json.dumps(payload, ensure_ascii=False)
 
-        return [exec_command, read_file, write_file, list_files]
+        all_tools = [exec_command, read_file, write_file, list_files]
+        return [tool for tool in all_tools if tool.__name__ in allowed]
 
     def _response_text(self, value: Any) -> str:
         if isinstance(value, str):
@@ -410,6 +556,17 @@ class OpenAIAgentsExecutionHost:
 
     def _specialist_specs(self) -> dict[str, dict[str, str]]:
         return {item["name"]: item for item in builtin_subagents()}
+
+    def _allowed_tool_names_for_role(self, role: str, *, delivery_mode: bool) -> set[str]:
+        if delivery_mode:
+            return {"exec_command", "read_file", "write_file", "list_files"}
+        if role == "investigator":
+            return {"exec_command", "read_file", "list_files"}
+        if role == "implementer":
+            return {"exec_command", "read_file", "write_file", "list_files"}
+        if role == "verifier":
+            return {"exec_command", "read_file", "list_files"}
+        return {"exec_command", "read_file", "write_file", "list_files"}
 
     def _coerce_delegation_packets(self, payload: dict[str, Any], *, memory_sources: list[str]) -> list[dict[str, Any]]:
         raw_packets = payload.get("delegation_packets")
@@ -436,6 +593,17 @@ class OpenAIAgentsExecutionHost:
                             if str(value).strip()
                         ],
                         "output_contract": str(item.get("output_contract") or "").strip(),
+                        "preferred_artifact_refs": [
+                            str(value).strip()
+                            for value in list(item.get("preferred_artifact_refs") or [])[:6]
+                            if str(value).strip()
+                        ],
+                        "inherited_evidence": [
+                            str(value).strip()
+                            for value in list(item.get("inherited_evidence") or [])[:6]
+                            if str(value).strip()
+                        ],
+                        "routing_reason": str(item.get("routing_reason") or "").strip(),
                     }
                 )
         if packets:
@@ -467,6 +635,9 @@ class OpenAIAgentsExecutionHost:
                     "working_set": list(default_working_set),
                     "acceptance_checks": [],
                     "output_contract": output_contract,
+                    "preferred_artifact_refs": [],
+                    "inherited_evidence": [],
+                    "routing_reason": "",
                 }
             )
         return defaults
@@ -478,6 +649,78 @@ class OpenAIAgentsExecutionHost:
         summary = lines[0][:240]
         evidence = lines[1:4] if len(lines) > 1 else [summary]
         return summary, evidence[:4]
+
+    def _paths_overlap(self, left: str, right: str) -> bool:
+        left_value = left.strip().strip("/")
+        right_value = right.strip().strip("/")
+        if not left_value or not right_value:
+            return False
+        return (
+            left_value == right_value
+            or left_value.startswith(right_value + "/")
+            or right_value.startswith(left_value + "/")
+        )
+
+    def _effective_working_set_for_role(
+        self,
+        *,
+        role: str,
+        packet: dict[str, Any],
+        prior_returns: list[dict[str, Any]],
+    ) -> list[str]:
+        base_scope = [
+            str(value).strip()
+            for value in list(packet.get("working_set") or [])[:8]
+            if str(value).strip()
+        ]
+        if role != "implementer":
+            return base_scope
+
+        investigator_scope: list[str] = []
+        for item in reversed(prior_returns):
+            if str(item.get("role") or "").strip() != "investigator":
+                continue
+            investigator_scope = [
+                str(value).strip()
+                for value in list(item.get("working_set") or [])[:8]
+                if str(value).strip()
+            ]
+            if investigator_scope:
+                break
+        if not investigator_scope:
+            return base_scope
+        if not base_scope:
+            return investigator_scope[:8]
+
+        narrowed_scope: list[str] = []
+        for candidate in investigator_scope:
+            if any(self._paths_overlap(candidate, base) for base in base_scope):
+                narrowed_scope.append(candidate)
+        return list(dict.fromkeys(narrowed_scope or base_scope))[:8]
+
+    def _build_specialist_handoff_text(
+        self,
+        *,
+        role: str,
+        summary: str,
+        evidence: list[str],
+        working_set: list[str],
+        acceptance_checks: list[str],
+        artifact_refs: list[str],
+        routing_reason: str,
+    ) -> str:
+        lines = [f"{role} summary: {summary}"]
+        if working_set:
+            lines.append("Working set: " + ", ".join(working_set[:8]))
+        if acceptance_checks:
+            lines.append("Acceptance checks: " + "; ".join(acceptance_checks[:6]))
+        if artifact_refs:
+            lines.append("Artifact scope: " + "; ".join(artifact_refs[:4]))
+        if routing_reason:
+            lines.append("Routing reason: " + routing_reason)
+        if evidence:
+            lines.extend(f"Evidence: {item}" for item in evidence[:3])
+        return "\n".join(lines)
 
     def _run_agent_sync(
         self,
@@ -522,17 +765,47 @@ class OpenAIAgentsExecutionHost:
         for packet in packets:
             role = packet["role"]
             spec = specs[role]
+            effective_working_set = self._effective_working_set_for_role(
+                role=role,
+                packet=packet,
+                prior_returns=delegation_returns,
+            )
             prior_context: list[str] = []
             if delegation_returns:
                 prior_context.append("Previous specialist handoffs:")
                 for item in delegation_returns[-2:]:
-                    prior_context.append(f"- {item['role']}: {item['summary']}")
+                    prior_context.append(item.get("handoff_text") or f"{item['role']}: {item['summary']}")
             packet_context = [
                 f"Role mission: {packet['mission']}",
                 *([f"Working set: {', '.join(packet['working_set'][:8])}"] if packet["working_set"] else []),
+                *(
+                    [f"Effective edit scope: {', '.join(effective_working_set[:8])}"]
+                    if role == "implementer" and effective_working_set != list(packet["working_set"])
+                    else []
+                ),
                 *([f"Acceptance checks: {'; '.join(packet['acceptance_checks'][:6])}"] if packet["acceptance_checks"] else []),
+                *(
+                    [f"Routed artifacts: {'; '.join(packet['preferred_artifact_refs'][:4])}"]
+                    if packet["preferred_artifact_refs"]
+                    else []
+                ),
+                *(
+                    [f"Inherited evidence: {'; '.join(packet['inherited_evidence'][:4])}"]
+                    if packet["inherited_evidence"]
+                    else []
+                ),
+                *([f"Routing reason: {packet['routing_reason']}"] if packet["routing_reason"] else []),
                 *([f"Output contract: {packet['output_contract']}"] if packet["output_contract"] else []),
             ]
+            role_tools = self._build_function_tools(
+                root_dir=agent.root_dir,
+                recorder=self._trace,
+                delivery_mode=agent.delivery_mode,
+                allowed_tool_names=self._allowed_tool_names_for_role(role, delivery_mode=agent.delivery_mode),
+                role_name=role,
+                working_set=list(effective_working_set),
+                preferred_artifact_refs=list(packet["preferred_artifact_refs"]),
+            )
             instructions = "\n\n".join(
                 [
                     agent.system_prompt,
@@ -540,26 +813,41 @@ class OpenAIAgentsExecutionHost:
                     *prior_context,
                     *packet_context,
                     "Return a concise execution summary first, then the most relevant evidence or commands you used.",
-                    "Use the available local tools directly. Keep your working set narrow and avoid broad rewrites.",
+                    (
+                        "Use the available local tools directly. "
+                        "Investigator and verifier must not edit files. "
+                        "Implementer may edit files, but only inside the narrow working set."
+                    ),
                 ]
             )
             result = self._run_agent_sync(
                 agent_name=f"Aionis Workbench {role}",
                 instructions=instructions,
                 model=model,
-                tools=tools,
+                tools=role_tools,
                 user_input=user_input,
                 timeout_seconds=timeout_budget,
             )
             output_text = self._response_text(getattr(result, "final_output", result)).strip()
             summary, evidence = self._specialist_summary(output_text)
+            handoff_text = self._build_specialist_handoff_text(
+                role=role,
+                summary=summary,
+                evidence=evidence,
+                working_set=list(effective_working_set),
+                acceptance_checks=list(packet["acceptance_checks"]),
+                artifact_refs=list(packet["preferred_artifact_refs"]),
+                routing_reason=str(packet["routing_reason"] or ""),
+            )
             run_payload = {
                 "role": role,
                 "status": "success",
                 "summary": summary,
                 "evidence": evidence,
-                "working_set": list(packet["working_set"]),
+                "working_set": list(effective_working_set),
                 "acceptance_checks": list(packet["acceptance_checks"]),
+                "artifact_refs": list(packet["preferred_artifact_refs"]),
+                "handoff_text": handoff_text,
             }
             delegation_returns.append(run_payload)
             role_sequence.append(role)
@@ -570,7 +858,7 @@ class OpenAIAgentsExecutionHost:
                     "model": self._config.model,
                     "role": role,
                     "messages": len(payload.get("messages") or []),
-                    "tools": len(tools),
+                    "tools": len(role_tools),
                     "root_dir": agent.root_dir,
                 },
                 result=output_text,

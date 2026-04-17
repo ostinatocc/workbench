@@ -31,7 +31,7 @@ from aionis_workbench.reviewer_contracts import ReviewPackSummary, ResumeAnchor,
 from aionis_workbench.orchestrator import OrchestrationResult
 from aionis_workbench.recovery_service import ValidationResult
 from aionis_workbench.runtime import AionisWorkbench, WorkbenchRunResult, _build_app_delivery_contract
-from aionis_workbench.session import SessionState, auto_learning_path, load_session, save_session
+from aionis_workbench.session import DelegationReturn, SessionState, auto_learning_path, load_session, save_session
 
 
 def _prepare_workbench(tmp_path: Path, monkeypatch, *, label: str) -> AionisWorkbench:
@@ -1919,6 +1919,7 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
                     "evidence": ["Touched src/demo.py."],
                     "working_set": ["src/demo.py"],
                     "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "artifact_refs": [".aionis-workbench/artifacts/investigator.json"],
                 },
                 {
                     "role": "verifier",
@@ -1935,7 +1936,7 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
     payload = workbench.run(
         task_id="product-run-multi-agent-1",
         task="Repair the demo export path.",
-        target_files=["src/demo.py"],
+        target_files=["src", "README.md"],
         validation_commands=["python3 -c \"print('ok')\""],
     )
 
@@ -1943,8 +1944,151 @@ def test_product_run_persists_structured_host_delegation_returns(tmp_path, monke
     assert [item["role"] for item in payload.session["delegation_returns"]] == ["investigator", "implementer", "verifier"]
     assert payload.session["delegation_returns"][0]["summary"] == "Narrowed src/demo.py"
     assert payload.session["delegation_returns"][2]["summary"] == "Validation passed."
+    assert payload.session["delegation_returns"][0]["handoff_text"].startswith("investigator summary:")
+    implementer_packet = next(item for item in payload.session["delegation_packets"] if item["role"] == "implementer")
+    assert implementer_packet["working_set"] == ["src/demo.py"]
+    assert any(item.endswith("/investigator.json") for item in implementer_packet["preferred_artifact_refs"])
+    collaboration_kinds = {item["kind"] for item in payload.session["collaboration_patterns"]}
+    assert "effective_edit_scope_strategy" in collaboration_kinds
+    assert {"artifact_scope_strategy", "artifact_routing_strategy"} & collaboration_kinds
     assert payload.canonical_views["task_state"]["status"] == "completed"
     assert payload.canonical_views["controller"]["status"] == "completed"
+    assert payload.canonical_views["routing"]["summary"]["implementer_effective_scope"] == ["src/demo.py"]
+    assert payload.canonical_views["routing"]["summary"]["implementer_artifact_scope"] == [
+        ".aionis-workbench/artifacts/investigator.json"
+    ]
+    assert payload.canonical_views["routing"]["summary"]["implementer_scope_narrowed"] is True
+    assert payload.canonical_views["routing"]["summary"]["implementer_scope_source"] == "investigator_narrowed"
+    assert payload.session["continuity_snapshot"]["implementer_effective_scope"] == ["src/demo.py"]
+    assert any(
+        item.endswith("/investigator.json")
+        for item in payload.session["continuity_snapshot"]["implementer_artifact_scope"]
+    )
+    assert payload.session["continuity_snapshot"]["implementer_scope_source"] == "investigator_narrowed"
+
+
+def test_product_run_blocks_completion_when_verifier_reports_failure(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-run-verifier-gate")
+
+    session = workbench._initial_session(
+        task_id="product-run-verifier-gate-1",
+        task="Repair the demo export path.",
+        target_files=["src/demo.py"],
+        validation_commands=["python3 -m pytest -q"],
+        apply_strategy=False,
+    )
+    session.status = "running"
+    session.selected_role_sequence = ["investigator", "implementer", "verifier"]
+    session.delegation_returns = [
+        DelegationReturn(role="investigator", status="success", summary="Narrowed src/demo.py", handoff_text="investigator summary: narrowed"),
+        DelegationReturn(role="implementer", status="success", summary="Patched src/demo.py", handoff_text="implementer summary: patched"),
+        DelegationReturn(role="verifier", status="error", summary="Validation failed on the targeted check.", handoff_text="verifier summary: failed"),
+    ]
+    session.last_validation_result = {
+        "ok": False,
+        "command": "python3 -m pytest -q",
+        "exit_code": 1,
+        "summary": "Validation failed on the targeted check.",
+        "output": "FAILED tests/test_demo.py",
+        "changed_files": ["src/demo.py"],
+    }
+    session_path = workbench._save_session(session)
+
+    def _stub_run(**_: object) -> OrchestrationResult:
+        return OrchestrationResult(
+            task_id="product-run-verifier-gate-1",
+            runner="run",
+            content="Validation failed on the targeted check.",
+            session=session,
+            session_path=session_path,
+            aionis={
+                "task_session_state": {
+                    "status": "active",
+                    "allowed_actions": ["inspect_context", "plan_start", "pause", "complete"],
+                    "transition_guards": [],
+                },
+            },
+        )
+
+    monkeypatch.setattr(workbench._orchestrator, "run", _stub_run)
+
+    payload = workbench.run(
+        task_id="product-run-verifier-gate-1",
+        task="Repair the demo export path.",
+        target_files=["src/demo.py"],
+        validation_commands=["python3 -m pytest -q"],
+    )
+
+    controller = payload.canonical_views["controller"]
+    assert controller["status"] == "active"
+    assert controller["allowed_actions"] == ["inspect_context", "plan_start", "pause"]
+    assert "complete" in controller["blocked_actions"]
+    assert {
+        "action": "complete",
+        "reason": "Validation failed on the targeted check.",
+    } in controller["guard_reasons"]
+    assert payload.controller_action_bar == {
+        "task_id": "product-run-verifier-gate-1",
+        "status": "active",
+        "recommended_command": "/next product-run-verifier-gate-1",
+        "allowed_commands": [
+            "/next product-run-verifier-gate-1",
+            "/show product-run-verifier-gate-1",
+        ],
+    }
+
+
+def test_product_session_surfaces_block_completion_when_verifier_reports_failure(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-session-verifier-gate")
+    session = workbench._initial_session(
+        task_id="product-session-verifier-gate-1",
+        task="Repair the demo export path.",
+        target_files=["src/demo.py"],
+        validation_commands=["python3 -m pytest -q"],
+        apply_strategy=False,
+    )
+    session.status = "running"
+    session.selected_role_sequence = ["investigator", "implementer", "verifier"]
+    session.delegation_returns = [
+        DelegationReturn(role="verifier", status="error", summary="Validation failed on the targeted check.", handoff_text="verifier summary: failed"),
+    ]
+    session.last_validation_result = {
+        "ok": False,
+        "command": "python3 -m pytest -q",
+        "exit_code": 1,
+        "summary": "Validation failed on the targeted check.",
+        "output": "FAILED tests/test_demo.py",
+        "changed_files": ["src/demo.py"],
+    }
+    workbench._save_session(session)
+
+    inspected = workbench.inspect_session(task_id="product-session-verifier-gate-1")
+    evaluated = workbench.evaluate_session(task_id="product-session-verifier-gate-1")
+    status = workbench.shell_status(task_id="product-session-verifier-gate-1")
+
+    expected_bar = {
+        "task_id": "product-session-verifier-gate-1",
+        "status": "active",
+        "recommended_command": "/next product-session-verifier-gate-1",
+        "allowed_commands": [
+            "/next product-session-verifier-gate-1",
+            "/show product-session-verifier-gate-1",
+            "/session product-session-verifier-gate-1",
+        ],
+    }
+
+    for payload in (inspected, evaluated, status):
+        controller = payload["canonical_views"]["controller"] if "canonical_views" in payload else payload["controller"]
+        assert controller["allowed_actions"] == ["list_events", "inspect_context", "record_event", "plan_start", "pause"]
+        assert "complete" in controller["blocked_actions"]
+        assert {
+            "action": "complete",
+            "reason": "Validation failed on the targeted check.",
+        } in controller["guard_reasons"]
+
+    assert inspected["controller_action_bar"] == expected_bar
+    assert evaluated["controller_action_bar"] == expected_bar
+    assert status["controller_action_bar"] == expected_bar
 
 
 def test_product_runtime_ship_routes_existing_project_tasks_to_run(tmp_path, monkeypatch) -> None:

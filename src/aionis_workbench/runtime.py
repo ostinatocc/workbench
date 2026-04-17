@@ -22,6 +22,7 @@ from .consolidation import describe_family_prior_seed
 from .consolidation_state import load_consolidation_summary
 from .config import load_aionis_config, load_workbench_config, resolve_aionis_base_url, resolve_repo_root
 from .controller_shell import controller_action_bar_payload
+from .controller_state import apply_session_controller_gates
 from .delivery_executor import DeliveryExecutor
 from .delivery_families import (
     NODE_EXPRESS_API,
@@ -1354,6 +1355,7 @@ class AionisWorkbench:
         canonical_views = self._canonical_views(session)
         controller_view = _controller_view_from_aionis(aionis)
         if controller_view:
+            controller_view = apply_session_controller_gates(controller_view, session) or controller_view
             canonical_views = {
                 **canonical_views,
                 "controller": controller_view,

@@ -40,6 +40,8 @@ class DelegationReturn:
     evidence: list[str] = field(default_factory=list)
     working_set: list[str] = field(default_factory=list)
     acceptance_checks: list[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
+    handoff_text: str = ""
 
 
 @dataclass

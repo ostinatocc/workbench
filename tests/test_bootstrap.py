@@ -42,7 +42,12 @@ sys.modules.setdefault("langchain_core.messages", langchain_core_messages)
 
 from aionis_workbench.runtime import AionisWorkbench, ValidationResult
 from aionis_workbench.execution_packet import InstrumentationSummary
-from aionis_workbench.session import CollaborationPattern
+from aionis_workbench.session import (
+    ArtifactReference,
+    CollaborationPattern,
+    DelegationPacket,
+    DelegationReturn,
+)
 from aionis_workbench.consolidation_state import (
     consolidation_state_path,
     consolidation_summary_path,
@@ -778,6 +783,119 @@ def test_initial_session_uses_promoted_prior_after_manual_consolidate(tmp_path, 
     assert session.selected_task_family == "task:demo"
     assert session.validation_commands[0] == validation_command
     assert session.target_files[:2] == ["src/demo.py", "tests/test_demo.py"]
+
+
+def test_initial_session_reuses_effective_edit_scope_for_implementer_packets(tmp_path, monkeypatch) -> None:
+    _seed_python_repo(tmp_path)
+    monkeypatch.setenv("AIONIS_BASE_URL", "http://127.0.0.1:3101")
+
+    workbench = AionisWorkbench(repo_root=str(tmp_path))
+    validation_command = "python3 -c \"print('ok')\""
+    prior = workbench._initial_session(
+        task_id="demo-effective-scope-prior",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=[validation_command],
+        apply_strategy=False,
+    )
+    prior.status = "validated"
+    prior.selected_task_family = "task:repair-demo"
+    prior.selected_trust_signal = "same_task_family"
+    prior.selected_family_scope = "same_task_family"
+    prior.selected_strategy_profile = "family_reuse_loop"
+    prior.selected_validation_style = "targeted_first"
+    prior.selected_role_sequence = ["investigator", "implementer", "verifier"]
+    prior.delegation_packets = [
+        DelegationPacket(role="investigator", mission="Inspect the narrow demo failure.", working_set=["src/demo.py"]),
+        DelegationPacket(
+            role="implementer",
+            mission="Patch the demo export path.",
+            working_set=["src", "README.md"],
+            preferred_artifact_refs=[".aionis-workbench/artifacts/investigator.json"],
+            routing_reason="Implementer inherits the narrow diagnosis before editing.",
+        ),
+        DelegationPacket(
+            role="verifier",
+            mission="Re-run the narrow validation loop.",
+            working_set=["src/demo.py"],
+            acceptance_checks=[validation_command],
+        ),
+    ]
+    prior.delegation_returns = [
+        DelegationReturn(
+            role="investigator",
+            status="success",
+            summary="Narrowed src/demo.py",
+            evidence=["Root cause isolated to the export path."],
+            working_set=["src/demo.py"],
+            handoff_text="investigator summary: narrowed src/demo.py",
+        ),
+        DelegationReturn(
+            role="implementer",
+            status="success",
+            summary="Patched src/demo.py",
+            evidence=["Touched src/demo.py."],
+            working_set=["src/demo.py"],
+            artifact_refs=[".aionis-workbench/artifacts/investigator.json"],
+            handoff_text="implementer summary: patched src/demo.py",
+        ),
+        DelegationReturn(
+            role="verifier",
+            status="success",
+            summary="Validation passed.",
+            evidence=[f"Command: {validation_command}"],
+            working_set=["src/demo.py"],
+            acceptance_checks=[validation_command],
+            handoff_text="verifier summary: validation passed",
+        ),
+    ]
+    prior.collaboration_patterns = [
+        CollaborationPattern(
+            kind="effective_edit_scope_strategy",
+            role="implementer",
+            summary="Start implementation from src/demo.py before widening back to the packet scope.",
+            reuse_hint="src/demo.py",
+            confidence=0.88,
+            task_family="task:repair-demo",
+        ),
+        CollaborationPattern(
+            kind="artifact_scope_strategy",
+            role="implementer",
+            summary="Anchor implementer context to the investigator artifact first.",
+            reuse_hint=".aionis-workbench/artifacts/investigator.json",
+            confidence=0.82,
+            task_family="task:repair-demo",
+        ),
+    ]
+    prior.artifacts = [
+        ArtifactReference(
+            artifact_id="artifact-investigator-1",
+            kind="analysis_note",
+            role="investigator",
+            summary="Investigator narrowed the export mismatch to src/demo.py.",
+            path=".aionis-workbench/artifacts/investigator.json",
+        )
+    ]
+    save_session(prior)
+
+    session = workbench._initial_session(
+        task_id="demo-effective-scope-next",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=[validation_command],
+        apply_strategy=True,
+    )
+
+    implementer_packet = next(packet for packet in session.delegation_packets if packet.role == "implementer")
+
+    assert session.strategy_summary is not None
+    assert session.strategy_summary.selected_working_set == ["src/demo.py"]
+    assert any("effective_edit_scope_strategy" in item for item in session.selected_pattern_summaries)
+    assert any("artifact_scope_strategy" in item for item in session.selected_pattern_summaries)
+    assert implementer_packet.working_set == ["src/demo.py"]
+    assert implementer_packet.preferred_artifact_refs == [".aionis-workbench/artifacts/investigator.json"]
+    assert session.continuity_snapshot["prior_strategy_working_sets"][0] == "src/demo.py"
+    assert ".aionis-workbench/artifacts/investigator.json" in session.continuity_snapshot["prior_artifact_refs"]
 
 
 def test_manual_consolidation_summarizes_recent_project_learning(tmp_path, monkeypatch) -> None:
