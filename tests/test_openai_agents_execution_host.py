@@ -341,6 +341,121 @@ def test_openai_agents_execution_host_invoke_runs_builtin_specialists_and_return
     assert [step.tool_name for step in trace_steps].count("write_file") == 1
 
 
+def test_openai_agents_execution_host_uses_dynamic_handoff_graph_for_verifier_retry(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "aionis_workbench.openai_agents_execution_host._openai_agents_sdk_available",
+        lambda: True,
+    )
+    (tmp_path / "README.md").write_text("seed file\n", encoding="utf-8")
+
+    captures: list[dict[str, object]] = []
+    role_runs = {"investigator": 0, "implementer": 0, "verifier": 0}
+
+    class _FakeAgent:
+        def __init__(self, *, name, instructions, model, tools) -> None:
+            self.name = name
+            self.instructions = instructions
+            self.model = model
+            self.tools = tools
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(agent, user_input):
+            role = str(agent.name).split()[-1].lower()
+            role_runs[role] += 1
+            captures.append(
+                {
+                    "name": str(agent.name),
+                    "instructions": str(agent.instructions),
+                    "user_input": str(user_input),
+                    "tools": sorted(tool.__name__ for tool in agent.tools),
+                }
+            )
+            tools = {tool.__name__: tool for tool in agent.tools}
+            if role == "investigator":
+                return SimpleNamespace(final_output="Localized the failure in src/demo.py\nRoot cause: export mismatch")
+            if role == "implementer" and role_runs[role] == 1:
+                tools["write_file"]("src/demo.py", "tentative\n")
+                return SimpleNamespace(final_output="Applied a tentative fix in src/demo.py\nTouched files: src/demo.py")
+            if role == "implementer":
+                tools["write_file"]("src/demo.py", "final\n")
+                return SimpleNamespace(final_output="Refined the fix in src/demo.py\nTouched files: src/demo.py")
+            if role == "verifier" and role_runs[role] == 1:
+                return SimpleNamespace(
+                    final_output="Validation failed.\nCommand: python3 -m pytest -q\nBlocker: export path still mismatched"
+                )
+            return SimpleNamespace(final_output="Validation passed.\nCommand: python3 -m pytest -q")
+
+    def _fake_function_tool(fn):
+        return fn
+
+    host = OpenAIAgentsExecutionHost(config=_base_config(tmp_path), trace=TraceRecorder())
+    monkeypatch.setattr(host, "_configure_openai_agents_client", lambda: None)
+    monkeypatch.setattr(
+        host,
+        "_import_agents_runtime",
+        lambda: (_FakeAgent, _FakeRunner, _fake_function_tool, lambda *args, **kwargs: None, lambda *args, **kwargs: None),
+    )
+
+    prepared = host.build_agent(
+        system_parts=["system prompt"],
+        memory_sources=["README.md"],
+        timeout_pressure=False,
+        root_dir=str(tmp_path),
+        use_builtin_subagents=True,
+    )
+    output = host.invoke(
+        prepared,
+        {
+            "messages": [{"role": "user", "content": "Repair the export path."}],
+            "delegation_packets": [
+                {
+                    "role": "investigator",
+                    "mission": "Localize the failure.",
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return diagnosis and scope.",
+                },
+                {
+                    "role": "implementer",
+                    "mission": "Apply the narrow fix.",
+                    "working_set": ["src", "README.md"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return touched files.",
+                },
+                {
+                    "role": "verifier",
+                    "mission": "Validate the fix.",
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -m pytest -q"],
+                    "output_contract": "Return validation result.",
+                },
+            ],
+        },
+    )
+
+    assert output["role_sequence"] == ["investigator", "implementer", "verifier", "implementer", "verifier"]
+    assert [item["role"] for item in output["delegation_returns"]] == [
+        "investigator",
+        "implementer",
+        "verifier",
+        "implementer",
+        "verifier",
+    ]
+    assert output["delegation_returns"][2]["status"] == "error"
+    assert output["delegation_returns"][2]["handoff_target"] == "implementer"
+    assert output["delegation_returns"][2]["next_action"].startswith("Hand off to implementer")
+    assert output["delegation_returns"][4]["handoff_target"] == "orchestrator"
+    assert len(captures) == 5
+    assert "Graph hop: 4" in captures[3]["instructions"]
+    assert "verifier summary: Validation failed." in captures[3]["instructions"]
+    trace_steps = host._trace.export()
+    assert [step.tool_name for step in trace_steps].count("workbench.model") == 5
+    assert [step.tool_name for step in trace_steps].count("write_file") == 2
+
+
 def test_openai_agents_execution_host_blocks_mutating_commands_for_role_shells(
     tmp_path, monkeypatch
 ) -> None:

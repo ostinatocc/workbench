@@ -592,6 +592,7 @@ class SessionService:
                 artifact_budget=strategy.artifact_limit,
                 memory_source_limit=strategy.memory_source_limit,
                 explanation="; ".join(strategy.memory_lines[:3])[:400],
+                specialist_recommendation=strategy.specialist_recommendation[:240],
             )
             family_prior = _load_family_prior(
                 self._repo_root,
@@ -626,6 +627,7 @@ class SessionService:
                 session.strategy_summary.selected_validation_paths = self.normalize_validation_commands(
                     session.validation_commands
                 )[:4]
+                session.strategy_summary.specialist_recommendation = strategy.specialist_recommendation[:240]
         if seed_priors:
             seeded_artifacts: list[ArtifactReference] = []
             seen_artifacts: set[tuple[str, str, str]] = set()

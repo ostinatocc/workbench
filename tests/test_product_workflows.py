@@ -25,7 +25,13 @@ from aionis_workbench.delivery_families import (
     delivery_family_validation_commands,
 )
 from aionis_workbench.delivery_results import DeliveryExecutionResult
-from aionis_workbench.execution_packet import ExecutionPacket, ExecutionPacketSummary, InstrumentationSummary
+from aionis_workbench.execution_packet import (
+    ExecutionPacket,
+    ExecutionPacketSummary,
+    InstrumentationSummary,
+    RoutingSignalSummary,
+    StrategySummary,
+)
 from aionis_workbench.live_profile import save_live_profile_snapshot
 from aionis_workbench.reviewer_contracts import ReviewPackSummary, ResumeAnchor, ReviewerContract
 from aionis_workbench.orchestrator import OrchestrationResult
@@ -2116,6 +2122,205 @@ def test_product_session_surfaces_block_completion_when_verifier_reports_failure
     assert inspected["controller_action_bar"] == expected_bar
     assert evaluated["controller_action_bar"] == expected_bar
     assert status["controller_action_bar"] == expected_bar
+
+
+def test_product_inspect_session_uses_specialist_handoff_for_execution_packet_next_action(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-session-specialist-next-action")
+    retry_command = "python3 -m pytest tests/test_demo.py -q"
+    session = workbench._initial_session(
+        task_id="product-session-specialist-next-action-1",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=["python3 -m pytest -q"],
+        apply_strategy=False,
+    )
+    session.status = "running"
+    session.selected_role_sequence = ["investigator", "implementer", "verifier"]
+    session.strategy_summary = StrategySummary(
+        selected_working_set=["src/demo.py"],
+        selected_validation_paths=[retry_command],
+        specialist_recommendation=(
+            "Follow the specialist handoff back to implementer inside src/demo.py, "
+            f"then rerun {retry_command}."
+        ),
+    )
+    session.routing_signal_summary = RoutingSignalSummary(
+        implementer_effective_scope=["src/demo.py"],
+        verifier_blockers=["Blocker: export path still mismatched"],
+        verifier_validation_intent=[retry_command],
+    )
+    session.delegation_returns = [
+        DelegationReturn(
+            role="implementer",
+            status="success",
+            summary="Patched src/demo.py",
+            working_set=["src/demo.py"],
+            next_action=f"Hand off to verifier and run targeted validation: {retry_command}",
+        ),
+        DelegationReturn(
+            role="verifier",
+            status="error",
+            summary="Validation failed on the targeted check.",
+            blockers=["Blocker: export path still mismatched"],
+            validation_intent=[retry_command],
+            handoff_target="implementer",
+            next_action=f"Hand off to implementer and rerun the narrow fix loop before validating again: {retry_command}",
+        ),
+    ]
+    session.last_validation_result = {
+        "ok": False,
+        "command": retry_command,
+        "exit_code": 1,
+        "summary": "Validation failed on the targeted check.",
+        "output": "FAILED tests/test_demo.py",
+        "changed_files": ["src/demo.py"],
+    }
+    save_session(session)
+
+    payload = workbench.inspect_session(task_id="product-session-specialist-next-action-1")
+
+    assert payload["canonical_surface"]["execution_packet"]["next_action"] == (
+        "Follow verifier handoff to implementer inside src/demo.py to address "
+        "Blocker: export path still mismatched, then rerun python3 -m pytest tests/test_demo.py -q."
+    )
+    assert payload["canonical_views"]["strategy"]["specialist_recommendation"].startswith(
+        "Follow the specialist handoff back to implementer inside src/demo.py"
+    )
+
+
+def test_product_run_preserves_specialist_retry_handoff_graph(tmp_path, monkeypatch) -> None:
+    workbench = _prepare_workbench(tmp_path, monkeypatch, label="product-run-handoff-graph")
+
+    class _FakeTaskSession:
+        def __init__(self) -> None:
+            self._state = {
+                "status": "active",
+                "allowed_actions": ["record_event", "pause", "plan_start", "complete", "inspect_context"],
+                "transition_guards": [],
+            }
+
+        def snapshot_state(self) -> dict[str, object]:
+            return dict(self._state)
+
+        def inspect_task_context(self, **_: object) -> dict[str, object]:
+            return {"operator_projection": None, "delegation_learning": None, "planning_context": {}}
+
+        def plan_task_start(self, **_: object) -> dict[str, object]:
+            return {
+                "first_action": {"selected_tool": "edit", "next_action": "Start with a narrow investigation."},
+                "decision": {"planner_explanation": "Use the learned repair loop.", "task_family": "task:repair_demo"},
+                "task_context": {},
+            }
+
+        def complete_task(self, **_: object) -> dict[str, object]:
+            self._state = {"status": "completed", "allowed_actions": ["inspect_context"], "transition_guards": []}
+            return {"status": "ok", "replay_run_id": "replay-run-graph-1"}
+
+    monkeypatch.setattr(
+        workbench._orchestrator._runtime_host,
+        "open_task_session",
+        lambda **_: _FakeTaskSession(),
+    )
+    monkeypatch.setattr(workbench._orchestrator._execution_host, "build_agent", lambda **_: object())
+    monkeypatch.setattr(
+        workbench._orchestrator._execution_host,
+        "invoke",
+        lambda *_args, **_kwargs: {
+            "final_output": "[investigator] Narrowed src/demo.py\n[implementer] Tentative patch\n[verifier] Validation failed.\n[implementer] Refined patch\n[verifier] Validation passed.",
+            "role_sequence": ["investigator", "implementer", "verifier", "implementer", "verifier"],
+            "delegation_returns": [
+                {
+                    "role": "investigator",
+                    "status": "success",
+                    "summary": "Narrowed src/demo.py",
+                    "evidence": ["Root cause isolated to export handling."],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "handoff_target": "implementer",
+                    "next_action": "Hand off to implementer and keep the implementation inside src/demo.py.",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "implementer",
+                    "status": "success",
+                    "summary": "Applied a tentative fix in src/demo.py",
+                    "evidence": ["Touched src/demo.py."],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "artifact_refs": [".aionis-workbench/artifacts/investigator.json"],
+                    "handoff_target": "verifier",
+                    "next_action": "Hand off to verifier and run targeted validation: python3 -c \"print('ok')\"",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "verifier",
+                    "status": "error",
+                    "summary": "Validation failed.",
+                    "evidence": ["Command: python3 -c \"print('ok')\"", "Blocker: export path still mismatched"],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "handoff_target": "implementer",
+                    "next_action": "Hand off to implementer and rerun the narrow fix loop before validating again: python3 -c \"print('ok')\"",
+                    "blockers": ["Blocker: export path still mismatched"],
+                    "validation_intent": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "implementer",
+                    "status": "success",
+                    "summary": "Refined the fix in src/demo.py",
+                    "evidence": ["Adjusted export handling in src/demo.py."],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "artifact_refs": [".aionis-workbench/artifacts/investigator.json"],
+                    "handoff_target": "verifier",
+                    "next_action": "Hand off to verifier and run targeted validation: python3 -c \"print('ok')\"",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
+                },
+                {
+                    "role": "verifier",
+                    "status": "success",
+                    "summary": "Validation passed.",
+                    "evidence": ["Command: python3 -c \"print('ok')\""],
+                    "working_set": ["src/demo.py"],
+                    "acceptance_checks": ["python3 -c \"print('ok')\""],
+                    "handoff_target": "orchestrator",
+                    "next_action": "Report the validated fix back to the orchestrator and keep the task ready for completion.",
+                    "validation_intent": ["python3 -c \"print('ok')\""],
+                },
+            ],
+        },
+    )
+
+    payload = workbench.run(
+        task_id="product-run-handoff-graph-1",
+        task="Repair the demo export path.",
+        target_files=["src", "README.md"],
+        validation_commands=["python3 -c \"print('ok')\""],
+    )
+
+    assert [item["role"] for item in payload.session["delegation_returns"]] == [
+        "investigator",
+        "implementer",
+        "verifier",
+        "implementer",
+        "verifier",
+    ]
+    assert payload.canonical_views["routing"]["summary"]["specialist_handoff_chain"] == [
+        "investigator->implementer",
+        "implementer->verifier",
+        "verifier->implementer",
+        "implementer->verifier",
+        "verifier->orchestrator",
+    ]
+    assert payload.session["continuity_snapshot"]["specialist_handoff_chain"] == [
+        "investigator->implementer",
+        "implementer->verifier",
+        "verifier->implementer",
+        "implementer->verifier",
+        "verifier->orchestrator",
+    ]
+    assert payload.canonical_views["task_state"]["status"] == "completed"
+    assert payload.canonical_views["controller"]["status"] == "completed"
 
 
 def test_product_runtime_ship_routes_existing_project_tasks_to_run(tmp_path, monkeypatch) -> None:

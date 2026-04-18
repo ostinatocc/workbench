@@ -259,6 +259,11 @@ class SurfaceService:
         return payload
 
     def refresh_selected_strategy(self, session: SessionState) -> None:
+        existing_specialist_recommendation = (
+            str(session.strategy_summary.specialist_recommendation or "").strip()
+            if session.strategy_summary
+            else ""
+        )
         continuity = session.continuity_snapshot or {}
         passive = continuity.get("passive_observation") if isinstance(continuity, dict) else {}
         learning = continuity.get("learning") if isinstance(continuity, dict) else {}
@@ -291,6 +296,11 @@ class SurfaceService:
             validation_summary=str((session.last_validation_result or {}).get("summary") or ""),
             failure_name=self._recovery.load_correction_failure_name(session),
         )
+        if str((session.last_validation_result or {}).get("summary") or "").strip():
+            session.target_files = self._sessions.normalize_target_files(strategy.target_files or effective_target_files)
+            session.validation_commands = self._sessions.normalize_validation_commands(
+                strategy.validation_commands or effective_validation_commands
+            )
         session.selected_strategy_profile = strategy.strategy_profile
         session.selected_validation_style = strategy.validation_style
         session.selected_artifact_budget = strategy.artifact_limit
@@ -329,6 +339,7 @@ class SurfaceService:
             artifact_budget=strategy.artifact_limit,
             memory_source_limit=strategy.memory_source_limit,
             explanation="; ".join(explanation_lines)[:400],
+            specialist_recommendation=(strategy.specialist_recommendation or existing_specialist_recommendation)[:240],
         )
         family_prior = self._load_family_prior(
             self._repo_root,
@@ -345,6 +356,9 @@ class SurfaceService:
         if session.strategy_summary:
             session.strategy_summary.strategy_profile = session.selected_strategy_profile
             session.strategy_summary.validation_style = session.selected_validation_style
+            session.strategy_summary.specialist_recommendation = (
+                strategy.specialist_recommendation or existing_specialist_recommendation
+            )[:240]
 
     def record_learning(self, *, session: SessionState, source: str, validation: ValidationResult, auto_absorbed: bool) -> None:
         if not validation.ok:

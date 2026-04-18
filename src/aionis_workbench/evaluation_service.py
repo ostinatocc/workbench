@@ -422,6 +422,7 @@ class EvaluationService:
                 "preferred_artifacts": strategy.preferred_artifact_refs[:4] if strategy else [],
                 "artifact_budget": strategy.artifact_budget if strategy else None,
                 "memory_source_limit": strategy.memory_source_limit if strategy else None,
+                "specialist_recommendation": strategy.specialist_recommendation if strategy else None,
                 "explanation": strategy.explanation if strategy else None,
             },
             "routing": {

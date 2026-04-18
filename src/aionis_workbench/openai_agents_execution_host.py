@@ -734,12 +734,67 @@ class OpenAIAgentsExecutionHost:
             lines.extend(f"Evidence: {item}" for item in evidence[:3])
         return "\n".join(lines)
 
-    def _specialist_handoff_target(self, role: str) -> str:
-        if role == "investigator":
-            return "implementer"
-        if role == "implementer":
-            return "verifier"
-        if role == "verifier":
+    def _specialist_handoff_target(
+        self,
+        *,
+        role: str,
+        status: str,
+        blockers: list[str],
+        packet_by_role: dict[str, dict[str, Any]],
+        visit_counts: dict[str, int],
+    ) -> str:
+        spec = self._specialist_specs().get(role, {})
+        allowed_handoffs = [
+            value.strip()
+            for value in list(spec.get("allowed_handoffs") or [])
+            if isinstance(value, str) and value.strip()
+        ]
+        visit_budget = {"investigator": 1, "implementer": 2, "verifier": 2}
+
+        if status == "success":
+            if role == "investigator":
+                if (
+                    "implementer" in allowed_handoffs
+                    and "implementer" in packet_by_role
+                    and visit_counts.get("implementer", 0) < visit_budget["implementer"]
+                ):
+                    return "implementer"
+            if role == "implementer":
+                if (
+                    "verifier" in allowed_handoffs
+                    and "verifier" in packet_by_role
+                    and visit_counts.get("verifier", 0) < visit_budget["verifier"]
+                ):
+                    return "verifier"
+            if role == "verifier" and "orchestrator" in allowed_handoffs:
+                return "orchestrator"
+
+        if role == "verifier" and status != "success" and blockers:
+            for candidate in ("implementer", "investigator"):
+                if (
+                    candidate in allowed_handoffs
+                    and candidate in packet_by_role
+                    and visit_counts.get(candidate, 0) < visit_budget.get(candidate, 1)
+                ):
+                    return candidate
+
+        if role == "implementer" and status != "success":
+            if (
+                "investigator" in allowed_handoffs
+                and "investigator" in packet_by_role
+                and visit_counts.get("investigator", 0) < visit_budget["investigator"]
+            ):
+                return "investigator"
+
+        for candidate in allowed_handoffs:
+            if candidate == "orchestrator":
+                continue
+            if candidate not in packet_by_role:
+                continue
+            if visit_counts.get(candidate, 0) >= visit_budget.get(candidate, 1):
+                continue
+            return candidate
+        if "orchestrator" in allowed_handoffs:
             return "orchestrator"
         return ""
 
@@ -810,6 +865,11 @@ class OpenAIAgentsExecutionHost:
         if role == "verifier":
             if status == "success":
                 return "Report the validated fix back to the orchestrator and keep the task ready for completion."
+            if handoff_target and handoff_target != "orchestrator":
+                if primary_check:
+                    return f"Hand off to {handoff_target} and rerun the narrow fix loop before validating again: {primary_check}"
+                if blockers:
+                    return f"Hand off to {handoff_target} and revise the fix to address: {blockers[0]}"
             if primary_check:
                 return f"Revise the fix and rerun the verifier path: {primary_check}"
             if blockers:
@@ -855,11 +915,22 @@ class OpenAIAgentsExecutionHost:
     ) -> dict[str, Any]:
         packets = self._coerce_delegation_packets(payload, memory_sources=agent.memory_sources)
         specs = self._specialist_specs()
+        packet_by_role = {
+            str(packet.get("role") or "").strip(): packet
+            for packet in packets
+            if str(packet.get("role") or "").strip()
+        }
         delegation_returns: list[dict[str, Any]] = []
         role_sequence: list[str] = []
-        for packet in packets:
+        visit_counts: dict[str, int] = {}
+        current_role = "investigator" if "investigator" in packet_by_role else (packets[0]["role"] if packets else "")
+        max_hops = max(1, sum({"investigator": 1, "implementer": 2, "verifier": 2}.get(role, 1) for role in packet_by_role))
+        hop_index = 0
+        while current_role and hop_index < max_hops:
+            packet = packet_by_role[current_role]
             role = packet["role"]
             spec = specs[role]
+            revisit_count = visit_counts.get(role, 0)
             effective_working_set = self._effective_working_set_for_role(
                 role=role,
                 packet=packet,
@@ -871,6 +942,8 @@ class OpenAIAgentsExecutionHost:
                 for item in delegation_returns[-2:]:
                     prior_context.append(item.get("handoff_text") or f"{item['role']}: {item['summary']}")
             packet_context = [
+                f"Graph hop: {hop_index + 1}",
+                f"Role revisit count: {revisit_count}",
                 f"Role mission: {packet['mission']}",
                 *([f"Working set: {', '.join(packet['working_set'][:8])}"] if packet["working_set"] else []),
                 *(
@@ -928,7 +1001,6 @@ class OpenAIAgentsExecutionHost:
             )
             output_text = self._response_text(getattr(result, "final_output", result)).strip()
             summary, evidence = self._specialist_summary(output_text)
-            handoff_target = self._specialist_handoff_target(role)
             blockers = self._specialist_blockers(
                 role=role,
                 summary=summary,
@@ -941,6 +1013,15 @@ class OpenAIAgentsExecutionHost:
                 evidence=evidence,
             )
             derived_status = "error" if role == "verifier" and blockers and "pass" not in summary.lower() else "success"
+            projected_visit_counts = dict(visit_counts)
+            projected_visit_counts[role] = revisit_count + 1
+            handoff_target = self._specialist_handoff_target(
+                role=role,
+                status=derived_status,
+                blockers=blockers,
+                packet_by_role=packet_by_role,
+                visit_counts=projected_visit_counts,
+            )
             next_action = self._specialist_next_action(
                 role=role,
                 status=derived_status,
@@ -978,6 +1059,7 @@ class OpenAIAgentsExecutionHost:
             }
             delegation_returns.append(run_payload)
             role_sequence.append(role)
+            visit_counts[role] = projected_visit_counts[role]
             self._record_tool_result(
                 recorder=self._trace,
                 tool_name="workbench.model",
@@ -990,6 +1072,10 @@ class OpenAIAgentsExecutionHost:
                 },
                 result=output_text,
             )
+            hop_index += 1
+            if handoff_target == "orchestrator" or handoff_target not in packet_by_role:
+                break
+            current_role = handoff_target
         final_output = "\n".join(f"[{item['role']}] {item['summary']}" for item in delegation_returns)
         return {
             "final_output": final_output.strip(),

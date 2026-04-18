@@ -94,6 +94,7 @@ class StrategySummary:
     artifact_budget: int = 6
     memory_source_limit: int = 14
     explanation: str = ""
+    specialist_recommendation: str = ""
 
     @classmethod
     def from_dict(cls, value: dict | None) -> "StrategySummary | None":

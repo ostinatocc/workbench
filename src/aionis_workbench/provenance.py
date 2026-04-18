@@ -116,6 +116,11 @@ def build_provenance_surfaces(
         preferred_artifact_refs=preferred_artifact_refs,
         artifact_budget=session.selected_artifact_budget,
         memory_source_limit=session.selected_memory_source_limit,
+        specialist_recommendation=(
+            existing_strategy.specialist_recommendation[:240]
+            if existing_strategy and existing_strategy.specialist_recommendation
+            else ""
+        ),
         explanation=(
             f"Selected because {trust_phrase}."
             f" Family scope: {session.selected_family_scope or 'broader_similarity'}."

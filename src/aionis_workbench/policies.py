@@ -34,6 +34,7 @@ class StrategySelection:
     validation_style: str = "targeted_then_expand"
     trust_signal: str = "broader_similarity"
     selected_pattern_summaries: list[str] = field(default_factory=list)
+    specialist_recommendation: str = ""
 
 
 def _strip_repo_root_prefix(command: str, repo_root: str) -> str:
@@ -620,6 +621,8 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
             snapshot["validation_style"] = prior_snapshot["validation_style"]
         if isinstance(prior_snapshot.get("selected_pattern_summaries"), list):
             snapshot["selected_pattern_summaries"] = prior_snapshot["selected_pattern_summaries"][:4]
+        if prior_snapshot.get("specialist_recommendation"):
+            snapshot["specialist_recommendation"] = str(prior_snapshot["specialist_recommendation"])[:240]
         if prior_snapshot.get("selected_trust_signal"):
             snapshot["selected_trust_signal"] = prior_snapshot["selected_trust_signal"]
         if prior_snapshot.get("task_family"):
@@ -628,6 +631,8 @@ def build_continuity_snapshot(session: SessionState) -> dict[str, object]:
             snapshot["selected_family_scope"] = prior_snapshot["selected_family_scope"]
         if prior_snapshot.get("family_candidate_count"):
             snapshot["family_candidate_count"] = prior_snapshot["family_candidate_count"]
+    if session.strategy_summary and session.strategy_summary.specialist_recommendation:
+        snapshot["specialist_recommendation"] = session.strategy_summary.specialist_recommendation[:240]
     if session.workflow_signal_summary:
         snapshot["workflow_mode"] = session.workflow_signal_summary.workflow_mode
     elif prior_snapshot.get("workflow_mode"):
@@ -964,6 +969,12 @@ def _first_nonempty_line(text: str) -> str:
 
 def _unique_preserve_order(values: list[str], *, limit: int) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))[:limit]
+
+
+def _prioritize_candidates(existing: list[str], prioritized: list[str], *, limit: int) -> list[str]:
+    prioritized_values = [value for value in prioritized if isinstance(value, str) and value.strip()]
+    existing_values = [value for value in existing if isinstance(value, str) and value.strip()]
+    return list(dict.fromkeys([*prioritized_values, *existing_values]))[:limit]
 
 
 def _preferred_artifact_paths(session: SessionState) -> list[str]:
@@ -2046,6 +2057,49 @@ def _specialist_retry_guidance(
     )
 
 
+def _specialist_retry_recommendation(
+    session: SessionState,
+    *,
+    scope: list[str],
+    validation_intent: list[str],
+    blockers: list[str],
+    next_actions: list[str],
+) -> str:
+    verifier_return = _latest_delegation_return_for_role(session, "verifier")
+    implementer_return = _latest_delegation_return_for_role(session, "implementer")
+    handoff_target = ""
+    if verifier_return and verifier_return.status != "success":
+        handoff_target = str(verifier_return.handoff_target or "").strip()
+        if not handoff_target and (scope or validation_intent or blockers):
+            handoff_target = "implementer"
+    if not handoff_target and implementer_return:
+        handoff_target = str(implementer_return.handoff_target or "").strip()
+
+    narrowed_scope = ", ".join(value for value in scope[:3] if value)
+    primary_validation = next((value for value in validation_intent if value), "")
+    primary_blocker = next((value for value in blockers if value), "")
+
+    if handoff_target and handoff_target != "orchestrator":
+        recommendation = f"Follow the specialist handoff back to {handoff_target}"
+        if narrowed_scope:
+            recommendation += f" inside {narrowed_scope}"
+        if primary_blocker:
+            recommendation += f" to address {primary_blocker[:180]}"
+        if primary_validation:
+            recommendation += f", then rerun {primary_validation}"
+        return recommendation + "."
+
+    if next_actions:
+        return next_actions[0][:240]
+    if primary_validation and narrowed_scope:
+        return f"Stay inside {narrowed_scope} and rerun {primary_validation}."
+    if primary_validation:
+        return f"Rerun {primary_validation} before broadening scope."
+    if primary_blocker:
+        return f"Address the verifier blocker before broadening scope: {primary_blocker[:180]}."
+    return ""
+
+
 def select_collaboration_strategy(
     *,
     prior_sessions: list[SessionState],
@@ -2193,6 +2247,7 @@ def select_collaboration_strategy(
     selected_working_set: list[str] = []
     role_sequence: list[str] = []
     selected_patterns: list[CollaborationPattern] = []
+    specialist_recommendation = ""
 
     for score, pattern, prior in ranked_patterns:
         if score < 0.65:
@@ -2201,9 +2256,7 @@ def select_collaboration_strategy(
             continue
         if pattern.kind in {"working_set_strategy", "implementation_scope", "effective_edit_scope_strategy"} and pattern.reuse_hint:
             parsed_files = _parse_reuse_hint_files(pattern.reuse_hint)
-            for item in parsed_files:
-                if item not in selected_files:
-                    selected_files.append(item)
+            selected_files = _prioritize_candidates(selected_files, parsed_files, limit=12)
             selected_working_set = _prefer_narrower_working_set(selected_working_set, parsed_files)
             memory_lines.append(
                 f"Selected collaboration strategy ({pattern.affinity_level}): [{pattern.role}/{pattern.kind}] {pattern.summary}"
@@ -2338,10 +2391,16 @@ def select_collaboration_strategy(
                 retry_next_actions.extend(guidance_next_actions)
             if guidance_source != "none" and not retry_source:
                 retry_source = guidance_source
+            if not specialist_recommendation:
+                specialist_recommendation = _specialist_retry_recommendation(
+                    prior,
+                    scope=guidance_scope,
+                    validation_intent=guidance_validation,
+                    blockers=guidance_blockers,
+                    next_actions=guidance_next_actions,
+                )
         if retry_scope:
-            for item in retry_scope:
-                if item not in selected_files:
-                    selected_files.append(item)
+            selected_files = _prioritize_candidates(selected_files, retry_scope, limit=12)
             selected_working_set = _prefer_narrower_working_set(selected_working_set, retry_scope)
             memory_lines.append(
                 "Selected retry scope from specialist handoff"
@@ -2349,7 +2408,7 @@ def select_collaboration_strategy(
                 + f": {', '.join(retry_scope[:4])}"
             )
         if retry_validation_commands:
-            selected_commands = list(dict.fromkeys([*retry_validation_commands, *selected_commands]))
+            selected_commands = _prioritize_candidates(selected_commands, retry_validation_commands, limit=8)
             memory_lines.append(
                 "Selected verifier retry path"
                 + (f" ({retry_source})" if retry_source else "")
@@ -2361,6 +2420,8 @@ def select_collaboration_strategy(
             memory_lines.append(
                 "Specialist retry next action: " + list(dict.fromkeys(retry_next_actions))[0][:220]
             )
+        if specialist_recommendation:
+            memory_lines.append("Specialist graph recommendation: " + specialist_recommendation[:220])
     if role_sequence:
         memory_lines.append("Applied role sequence: " + " -> ".join(role_sequence[:3]))
     if not selected_working_set:
@@ -2382,6 +2443,7 @@ def select_collaboration_strategy(
         validation_style=validation_style,
         trust_signal=trust_signal,
         selected_pattern_summaries=selected_pattern_summaries,
+        specialist_recommendation=specialist_recommendation[:240],
     )
 
 

@@ -985,8 +985,13 @@ def test_refresh_selected_strategy_uses_specialist_retry_guidance_for_failed_run
     verifier_packet = next(packet for packet in session.delegation_packets if packet.role == "verifier")
 
     assert session.strategy_summary is not None
+    assert session.target_files[:2] == ["src/demo.py", "src"]
+    assert session.validation_commands[0] == retry_command
     assert session.strategy_summary.selected_working_set == ["src/demo.py"]
     assert session.strategy_summary.selected_validation_paths[0] == retry_command
+    assert session.strategy_summary.specialist_recommendation.startswith(
+        "Follow the specialist handoff back to implementer inside src/demo.py"
+    )
     assert "Selected retry scope" in session.strategy_summary.explanation
     assert implementer_packet.working_set == ["src/demo.py"]
     assert verifier_packet.acceptance_checks[0] == retry_command

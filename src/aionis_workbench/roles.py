@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from .session import DelegationPacket
 
 
-def builtin_subagents() -> list[dict[str, str]]:
+def builtin_subagents() -> list[dict[str, Any]]:
     return [
         {
             "name": "investigator",
@@ -12,6 +14,7 @@ def builtin_subagents() -> list[dict[str, str]]:
                 "You are the investigator. Read code, inspect tests, narrow the failure surface, "
                 "and return a concise diagnosis with file-level evidence."
             ),
+            "allowed_handoffs": ["implementer", "orchestrator"],
         },
         {
             "name": "implementer",
@@ -20,6 +23,7 @@ def builtin_subagents() -> list[dict[str, str]]:
                 "You are the implementer. Edit only the intended files, keep changes minimal, "
                 "and return a crisp patch summary with touched files."
             ),
+            "allowed_handoffs": ["verifier", "investigator", "orchestrator"],
         },
         {
             "name": "verifier",
@@ -28,6 +32,7 @@ def builtin_subagents() -> list[dict[str, str]]:
                 "You are the verifier. Run the narrowest relevant checks, report exact commands and results, "
                 "and call out residual risks."
             ),
+            "allowed_handoffs": ["implementer", "orchestrator"],
         },
     ]
 

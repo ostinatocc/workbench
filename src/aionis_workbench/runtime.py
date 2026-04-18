@@ -952,6 +952,73 @@ def _reviewer_ready_required(
     }
 
 
+def _specialist_retry_recommendation(session: SessionState) -> str:
+    verifier_return = next(
+        (
+            item
+            for item in reversed(session.delegation_returns)
+            if getattr(item, "role", "") == "verifier"
+        ),
+        None,
+    )
+    implementer_return = next(
+        (
+            item
+            for item in reversed(session.delegation_returns)
+            if getattr(item, "role", "") == "implementer"
+        ),
+        None,
+    )
+    routing = session.routing_signal_summary
+    scope = (
+        routing.implementer_effective_scope[:3]
+        if routing and routing.implementer_effective_scope
+        else (
+            implementer_return.working_set[:3]
+            if implementer_return and getattr(implementer_return, "working_set", None)
+            else []
+        )
+    )
+    blockers = (
+        routing.verifier_blockers[:2]
+        if routing and routing.verifier_blockers
+        else (
+            verifier_return.blockers[:2]
+            if verifier_return and getattr(verifier_return, "blockers", None)
+            else []
+        )
+    )
+    validation_intent = (
+        routing.verifier_validation_intent[:2]
+        if routing and routing.verifier_validation_intent
+        else (
+            verifier_return.validation_intent[:2]
+            if verifier_return and getattr(verifier_return, "validation_intent", None)
+            else []
+        )
+    )
+
+    if verifier_return and str(verifier_return.status or "").strip() != "success":
+        handoff_target = str(verifier_return.handoff_target or "").strip()
+        if handoff_target and handoff_target != "orchestrator":
+            recommendation = f"Follow verifier handoff to {handoff_target}"
+            if scope:
+                recommendation += f" inside {', '.join(scope)}"
+            if blockers:
+                recommendation += f" to address {blockers[0][:180]}"
+            if validation_intent:
+                recommendation += f", then rerun {validation_intent[0]}"
+            return recommendation + "."
+        if isinstance(verifier_return.next_action, str) and verifier_return.next_action.strip():
+            return verifier_return.next_action.strip()
+
+    if implementer_return and isinstance(implementer_return.next_action, str) and implementer_return.next_action.strip():
+        return implementer_return.next_action.strip()
+    if session.strategy_summary and session.strategy_summary.specialist_recommendation:
+        return session.strategy_summary.specialist_recommendation.strip()
+    return ""
+
+
 def _build_execution_packet(session: SessionState) -> tuple[ExecutionPacket, ExecutionPacketSummary]:
     current_stage, active_role = _determine_packet_stage(session)
     validation_summary = str((session.last_validation_result or {}).get("summary") or "")
@@ -1043,6 +1110,7 @@ def _build_execution_packet(session: SessionState) -> tuple[ExecutionPacket, Exe
         correction_artifact=correction_artifact,
     )
 
+    specialist_retry_action = _specialist_retry_recommendation(session)
     next_action = "Continue from the latest session state."
     if session.status == "completed":
         next_action = "Archive the successful packet and reuse the promoted strategy on similar tasks."
@@ -1052,6 +1120,8 @@ def _build_execution_packet(session: SessionState) -> tuple[ExecutionPacket, Exe
         next_action = "Use the correction packet and latest validation output to make one narrow fix."
     elif any(item.kind == "timeout_artifact" for item in session.artifacts):
         next_action = "Resume in timeout-aware mode and stay on the narrowest working set."
+    elif specialist_retry_action:
+        next_action = specialist_retry_action
     elif pending_validations:
         next_action = "Run the first targeted validation command and keep the working set narrow."
     if arc_session:
